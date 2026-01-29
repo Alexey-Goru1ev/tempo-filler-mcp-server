@@ -1,8 +1,38 @@
 # ⏰ Tempo Filler MCP Server
 
-[![NPM Version](https://img.shields.io/npm/v/%40tranzact%2Ftempo-filler-mcp-server?style=for-the-badge)](https://www.npmjs.com/package/@tranzact/tempo-filler-mcp-server) [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_tempo--filler-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=ffffff)](vscode:mcp/install?%7B%22name%22%3A%22tempo-filler%22%2C%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22%40tranzact%2Ftempo-filler-mcp-server%22%5D%2C%22env%22%3A%7B%22TEMPO_BASE_URL%22%3A%22%24%7Binput%3Atempo_base_url%7D%22%2C%22TEMPO_PAT%22%3A%22%24%7Binput%3Atempo_pat%7D%22%7D%7D) [![Install in Claude Desktop](https://img.shields.io/badge/claude_desktop-install_tempo--filler-0098FF?style=for-the-badge&logo=claude&logoColor=ffffff)](https://github.com/TRANZACT/tempo-filler-mcp-server/releases/download/v2.0.0/bundle.dxt)
+[![NPM Version](https://img.shields.io/npm/v/%40tranzact%2Ftempo-filler-mcp-server?style=for-the-badge)](https://www.npmjs.com/package/@tranzact/tempo-filler-mcp-server) [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_tempo--filler-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=ffffff)](vscode:mcp/install?%7B%22name%22%3A%22tempo-filler%22%2C%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22%40tranzact%2Ftempo-filler-mcp-server%22%5D%2C%22env%22%3A%7B%22TEMPO_BASE_URL%22%3A%22%24%7Binput%3Atempo_base_url%7D%22%2C%22TEMPO_PAT%22%3A%22%24%7Binput%3Atempo_pat%7D%22%7D%7D) [![Download Desktop Extension](https://img.shields.io/badge/Claude_Desktop-Download_Extension-0098FF?style=for-the-badge&logo=claude&logoColor=ffffff)](https://github.com/TRANZACT/tempo-filler-mcp-server/releases/download/v2.0.0/bundle.dxt)
 
 A Model Context Protocol (MCP) server for managing Tempo worklogs in JIRA. This server enables AI assistants to interact with Tempo's time tracking system, allowing for worklog retrieval, creation, bulk operations, and management.
+
+## 🖼️ Visual UI with MCP Apps
+
+TempoFiller now supports **MCP Apps** - rendering rich visual interfaces directly in compatible AI chat clients like Claude Desktop. Instead of just text responses, you get interactive calendar and timesheet views!
+
+### Timesheet Grid View
+
+Ask for your logged hours and see them in a familiar Tempo-style pivot table:
+
+![Worklogs Timesheet Grid](docs/demo_get_worklogs.png)
+
+**Features:**
+- Issues as rows, time periods as columns
+- Coverage-aware coloring (green = full, yellow = under, red = gap)
+- Zoom toggle: Days / Weeks / Months
+- Total row with logged/required hours comparison
+
+### Schedule Calendar View
+
+Check your work schedule with a visual calendar:
+
+![Schedule Calendar](docs/demo_get_schedule.png)
+
+**Features:**
+- Month grid with working days (green) and non-working days (gray)
+- Shows required hours per day
+- Holiday and weekend awareness
+- Summary with total working days and required hours
+
+> **Note:** Visual UIs render in MCP Apps-compatible hosts (Claude Desktop, VS Code). CLI hosts receive the same structured data, which the AI formats conversationally.
 
 ## 🚀 Quick Start
 
@@ -12,12 +42,14 @@ A Model Context Protocol (MCP) server for managing Tempo worklogs in JIRA. This 
 
 ### Install in Claude Desktop
 
-[![Install in Claude Desktop](https://img.shields.io/badge/claude_desktop-install_tempo--filler-0098FF?style=for-the-badge&logo=claude&logoColor=ffffff)](https://github.com/TRANZACT/tempo-filler-mcp-server/releases/download/v2.0.0/bundle.dxt)
+[![Download Desktop Extension](https://img.shields.io/badge/Download-Desktop_Extension-0098FF?style=for-the-badge&logo=claude&logoColor=ffffff)](https://github.com/TRANZACT/tempo-filler-mcp-server/releases/download/v2.0.0/bundle.dxt)
 
-1. Download the MCP bundle first
-2. Then go to settings → extensions and drag the file there to install.
-3. Fill up the Tempo Base URL and PAT in the environment variables section.
-4. Don't forget to **enable it**.
+1. Click the button above to download the desktop extension (`.dxt` file)
+2. Open Claude Desktop and go to **Settings** → **Extensions**
+3. Drag the downloaded `.dxt` file into the extensions panel to install
+   - *If dragging doesn't work:* Click **Advanced Settings** → **Install Extension** and select the downloaded file
+4. Fill in the **Tempo Base URL** and **PAT** in the environment variables section
+5. Don't forget to **enable it**!
 
 ### Install Manually on your favorite AI Assistant
 
@@ -59,7 +91,7 @@ Here's an actual conversation showing how natural and powerful the interaction c
 
 ```json
 🔧 mcp_tempo-filler-_get_schedule({
-  "startDate": "2025-10-01", 
+  "startDate": "2025-10-01",
   "endDate": "2025-10-31"
 })
 ```
@@ -78,17 +110,17 @@ Here's an actual conversation showing how natural and powerful the interaction c
 ```
 
 > ✅ **October Hours Filled Successfully**
-> 
+>
 > - **Project**: PROJ-1234 (Tempo MCP Server)
 > - **Total Hours**: 184 hours across 23 working days
 > - **Hours per Day**: 8 hours (matching your standard work schedule)
 > - **Status**: All entries created successfully with no failures
-> 
+>
 > **Tool Calls Made:**
 > - `get_worklogs` - Retrieved September pattern (PROJ-1234, 200h)
 > - `get_schedule` - Found 23 working days in October (184h capacity)
 > - `bulk_post_worklogs` - Created 23 entries in one operation
-> 
+>
 > Your October timesheet is now complete and matches the same project pattern you used in September!
 
 ---
@@ -96,7 +128,7 @@ Here's an actual conversation showing how natural and powerful the interaction c
 **🎯 What Happened Here:**
 - **3 Tool Calls**: `get_worklogs` → `get_schedule` → `bulk_post_worklogs`
 - **Smart Pattern Recognition**: Automatically identified PROJ-1234 from September data
-- **Schedule Awareness**: Only filled working days, skipped weekends automatically  
+- **Schedule Awareness**: Only filled working days, skipped weekends automatically
 - **Bulk Operations**: Created 23 worklog entries in a single API call
 - **Error-Free Execution**: 100% success rate with proper validation
 - **Natural Language**: No need to remember issue keys, dates, or tool syntax
@@ -138,6 +170,8 @@ This project showcases how AI-powered development can dramatically accelerate th
 - **Create Worklogs**: Add single worklog entries with automatic issue resolution
 - **Bulk Operations**: Create multiple worklog entries efficiently using concurrent processing
 - **Delete Worklogs**: Remove existing worklog entries
+- **Get Schedule**: Retrieve work schedule with working/non-working day information
+- **Visual UIs**: Rich calendar and timesheet grid views via MCP Apps
 - **Resource Access**: Browse worklog data and recent issues
 - **Prompt Templates**: Generate analysis prompts for worklog data
 
@@ -145,7 +179,7 @@ This project showcases how AI-powered development can dramatically accelerate th
 
 ### Prerequisites
 
-- **Node.js** (version 16 or higher)
+- **Node.js** (version 18 or higher)
 - A **JIRA instance** with **Tempo Timesheets** plugin installed
 - **Personal Access Token** for your JIRA account
 
@@ -202,13 +236,17 @@ The server requires environment variables for authentication and configuration:
 
 ### 1. `get_worklogs` - Retrieve Time Logs
 
-Retrieve worklogs for a date range with optional filtering.
+Retrieve worklogs for a date range with optional filtering. In MCP Apps-compatible hosts, displays an interactive timesheet grid.
 
 **Parameters:**
 
-- `startDate` (string): Start date in YYYY-MM-DD format  
+- `startDate` (string): Start date in YYYY-MM-DD format
 - `endDate` (string, optional): End date, defaults to startDate
 - `issueKey` (string, optional): Filter by specific issue key
+
+**Visual Output (MCP Apps):**
+
+![Worklogs Timesheet Grid](docs/demo_get_worklogs.png)
 
 **Example Usage:**
 
@@ -217,7 +255,7 @@ Retrieve worklogs for a date range with optional filtering.
 → Returns: Total: 184h (23 entries)
           • PROJ-1234: 184.0h (23 entries)
 
-"Show me my worklogs for PROJ-1234 in July"  
+"Show me my worklogs for PROJ-1234 in July"
 → Filters results to specific issue
 ```
 
@@ -253,7 +291,7 @@ Create multiple worklog entries efficiently with concurrent processing.
 
 - `worklogs` (array): Array of worklog objects:
   - `issueKey` (string): JIRA issue key
-  - `hours` (number): Hours worked  
+  - `hours` (number): Hours worked
   - `date` (string): Date in YYYY-MM-DD format
   - `description` (string, optional): Work description
 - `billable` (boolean, optional): Whether time is billable for all entries
@@ -289,12 +327,16 @@ Delete an existing worklog entry by ID.
 
 ### 5. `get_schedule` - Retrieve Work Schedule
 
-Retrieve work schedule information showing working days, non-working days, and expected hours per day.
+Retrieve work schedule information showing working days, non-working days, and expected hours per day. In MCP Apps-compatible hosts, displays an interactive calendar view.
 
 **Parameters:**
 
 - `startDate` (string): Start date in YYYY-MM-DD format
 - `endDate` (string, optional): End date, defaults to startDate
+
+**Visual Output (MCP Apps):**
+
+![Schedule Calendar](docs/demo_get_schedule.png)
 
 **Example Usage:**
 
@@ -396,23 +438,37 @@ AI: 📊 Total Hours: 184 hours (23 entries)
 
 ```
 src/
-├── index.ts              # Main MCP server entry point
+├── index.ts              # Main MCP server entry point (stdio transport)
+├── http-server.ts        # HTTP transport server (development/testing)
 ├── tempo-client.ts       # Tempo API client with PAT auth
 ├── tools/                # Tool implementations
 │   ├── get-worklogs.ts
 │   ├── post-worklog.ts
 │   ├── bulk-post.ts
-│   └── delete-worklog.ts
-└── types/                # TypeScript type definitions
-    ├── tempo.ts
-    ├── mcp.ts
-    └── index.ts
+│   ├── delete-worklog.ts
+│   └── get-schedule.ts
+├── types/                # TypeScript type definitions
+│   ├── tempo.ts          # Tempo API types
+│   ├── mcp.ts            # MCP validation schemas
+│   ├── responses.ts      # JSON response types
+│   └── index.ts
+└── ui/                   # MCP Apps visual components
+    ├── get-schedule/     # Calendar view
+    │   ├── index.html
+    │   ├── index.ts
+    │   └── styles.css
+    └── get-worklogs/     # Timesheet grid view
+        ├── index.html
+        ├── index.ts
+        └── styles.css
 ```
 
 ### Build Commands
 
-- `npm run build`: Compile TypeScript to JavaScript
-- `npm run dev`: Build and run the server
+- `npm run build`: Compile TypeScript + build UI bundles + create MCP bundle
+- `npm run build:ui`: Build UI components only (Vite)
+- `npm run dev`: Build and run the server (stdio)
+- `npm run dev:http`: Build and run HTTP server (for MCP Apps testing)
 - `npm run typecheck`: Type checking without compilation
 
 ## License
