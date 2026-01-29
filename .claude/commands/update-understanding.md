@@ -6,12 +6,12 @@ To ensure the LLM is always primed with complete and comprehensive project conte
 
 - Ingest the full content of all existing `README.md` files for project overview and usage instructions.
 - Ingest the full content of `PROJECT_UNDERSTANDING.md` for a high-level summary of the project and its components.
-- Ingest every file from the `specs` directory for specifications and requirements, reading each file in its entirety.
-- List every file from all `src` directories using `git ls-files`, and read each file completely.
+- Ingest every file from the `specs` directory for specifications and requirements, reading each file in its entirety. Most of this specs have already been implemented, so this will give you context to understand the code you will read next.
+- List every file from all `src` directories using `git ls-files`, and read each file completely. Use sub-agents using Sonnet and Haiku to give you summaries/understanding of each file and folder so your context window does not fill up with the code.
 
 2. **Analysis & Comprehension**
 
-- Analyze all ingested resources in their entirety to develop a thorough understanding of the project's goals, architecture, coding standards, and requirements.
+- Analyze all ingested resources in their entirety to develop a thorough understanding of the project's goals, features, functionality, architecture, coding standards, and requirements.
 - Be prepared to answer questions or generate code that strictly follows the project's guidelines and objectives.
 
 3. **Documentation Maintenance**
