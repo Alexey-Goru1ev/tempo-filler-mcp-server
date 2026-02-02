@@ -72,6 +72,25 @@ if (!config.personalAccessToken) {
 // Initialize Tempo client
 const tempoClient = new TempoClient(config);
 
+// Server instructions for AI assistants
+// Following MCP best practices: focus on workflows, constraints, and cross-tool relationships
+// Avoid duplicating tool descriptions - those are in the tool definitions
+const SERVER_INSTRUCTIONS = `Tempo Timesheets integration for JIRA worklog management. Use when users ask about time tracking, logging hours, filling timesheets, or checking work schedules.
+
+WORKFLOW: Always get_schedule first → then create worklogs only on working days.
+
+CONSTRAINTS:
+- Dates: YYYY-MM-DD format
+- Hours: 0.1-24 per entry, default 8h/day
+- Bulk operations: max 100 entries
+- Issue keys: PROJECT-NUMBER format (e.g., PROJ-1234)
+
+TOOL RELATIONSHIPS:
+- get_schedule + bulk_post_worklogs: Check working days, then fill only those days
+- get_worklogs + delete_worklog: Review entries, then remove specific ones by ID
+- get_schedule + get_worklogs: Compare required vs logged hours for coverage gaps
+- post_worklog/bulk_post_worklogs/delete_worklog → get_worklogs: Always fetch worklogs after modifications so users see results visually`;
+
 // Create MCP server instance
 const server = new Server(
   {
@@ -84,6 +103,7 @@ const server = new Server(
       resources: {},
       prompts: {},
     },
+    instructions: SERVER_INSTRUCTIONS,
   }
 );
 
