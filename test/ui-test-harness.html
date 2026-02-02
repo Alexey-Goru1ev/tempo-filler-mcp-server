@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TempoFiller UI Test Harness</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      background: #f5f5f5;
+      padding: 16px;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin-bottom: 16px;
+      color: #333;
+    }
+
+    h2 {
+      font-size: 16px;
+      margin: 24px 0 12px 0;
+      color: #555;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 4px;
+    }
+
+    .test-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .test-case.dark {
+      background: #1a1a1a;
+      border-color: #333;
+    }
+
+    .test-header {
+      padding: 8px 12px;
+      background: #f0f0f0;
+      border-bottom: 1px solid #ddd;
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .test-case.dark .test-header {
+      background: #2a2a2a;
+      border-color: #444;
+      color: #aaa;
+    }
+
+    .test-header .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #e0e0e0;
+      color: #666;
+    }
+
+    .test-case.dark .test-header .badge {
+      background: #444;
+      color: #ccc;
+    }
+
+    .iframe-container {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .iframe-container iframe {
+      border: none;
+      width: 100%;
+      display: block;
+    }
+
+    .section-title {
+      grid-column: 1 / -1;
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>TempoFiller UI Test Harness</h1>
+
+  <h2>get_worklogs - Timesheet Grid</h2>
+  <div class="test-grid" id="worklogs-tests"></div>
+
+  <h2>get_schedule - Calendar</h2>
+  <div class="test-grid" id="schedule-tests"></div>
+
+  <script>
+    // Helper functions - MUST be defined before mockData
+    function generateSchedule(startDate, endDate) {
+      const days = [];
+      const start = new Date(startDate + "T00:00:00");
+      const end = new Date(endDate + "T00:00:00");
+      const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dayOfWeek = d.getDay();
+        const isWorkingDay = dayOfWeek >= 1 && dayOfWeek <= 5;
+        days.push({
+          date: d.toISOString().split("T")[0],
+          dayOfWeek: dayNames[dayOfWeek],
+          requiredHours: isWorkingDay ? 8 : 0,
+          isWorkingDay
+        });
+      }
+      return days;
+    }
+
+    function generateWorklogs(issueKeys, startDate, endDate, hoursPerDay, summaries) {
+      const worklogs = [];
+      const start = new Date(startDate + "T00:00:00");
+      const end = new Date(endDate + "T00:00:00");
+      let id = 1;
+
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dayOfWeek = d.getDay();
+        if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+          for (let i = 0; i < issueKeys.length; i++) {
+            const issueKey = issueKeys[i];
+            worklogs.push({
+              id: String(id++),
+              issueKey,
+              issueSummary: summaries?.[i] || "Task",
+              date: d.toISOString().split("T")[0],
+              hours: hoursPerDay / issueKeys.length,
+              comment: ""
+            });
+          }
+        }
+      }
+      return worklogs;
+    }
+
+    // Mock data definitions
+    const mockData = {
+      worklogs: {
+        empty: {
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          worklogs: [],
+          byIssue: [],
+          summary: { totalHours: 0, totalEntries: 0, uniqueIssues: 0 },
+          schedule: generateSchedule("2026-01-01", "2026-01-31")
+        },
+        singleIssue: {
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          worklogs: generateWorklogs(["PROJ-123"], "2026-01-01", "2026-01-31", 8, ["Implement user authentication flow"]),
+          byIssue: [{ issueKey: "PROJ-123", issueSummary: "Implement user authentication flow", totalHours: 160, entryCount: 20 }],
+          summary: { totalHours: 160, totalEntries: 20, uniqueIssues: 1 },
+          schedule: generateSchedule("2026-01-01", "2026-01-31")
+        },
+        multipleIssues: {
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          worklogs: [
+            ...generateWorklogs(["PROJ-123"], "2026-01-01", "2026-01-15", 4, ["Implement user authentication flow"]),
+            ...generateWorklogs(["PROJ-456"], "2026-01-01", "2026-01-31", 4, ["Database migration and optimization"]),
+            ...generateWorklogs(["PROJ-789"], "2026-01-16", "2026-01-31", 4, ["Frontend component refactoring"])
+          ],
+          byIssue: [
+            { issueKey: "PROJ-123", issueSummary: "Implement user authentication flow", totalHours: 40, entryCount: 10 },
+            { issueKey: "PROJ-456", issueSummary: "Database migration and optimization", totalHours: 80, entryCount: 20 },
+            { issueKey: "PROJ-789", issueSummary: "Frontend component refactoring", totalHours: 40, entryCount: 10 }
+          ],
+          summary: { totalHours: 160, totalEntries: 40, uniqueIssues: 3 },
+          schedule: generateSchedule("2026-01-01", "2026-01-31")
+        },
+        underLogged: {
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          worklogs: generateWorklogs(["PROJ-123"], "2026-01-01", "2026-01-31", 4, ["Part-time project work"]),
+          byIssue: [{ issueKey: "PROJ-123", issueSummary: "Part-time project work", totalHours: 80, entryCount: 20 }],
+          summary: { totalHours: 80, totalEntries: 20, uniqueIssues: 1 },
+          schedule: generateSchedule("2026-01-01", "2026-01-31")
+        },
+        overLogged: {
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          worklogs: generateWorklogs(["PROJ-123"], "2026-01-01", "2026-01-31", 10, ["Overtime project work"]),
+          byIssue: [{ issueKey: "PROJ-123", issueSummary: "Overtime project work", totalHours: 200, entryCount: 20 }],
+          summary: { totalHours: 200, totalEntries: 20, uniqueIssues: 1 },
+          schedule: generateSchedule("2026-01-01", "2026-01-31")
+        },
+        shortRange: {
+          startDate: "2026-01-06",
+          endDate: "2026-01-10",
+          worklogs: generateWorklogs(["PROJ-123"], "2026-01-06", "2026-01-10", 8, ["Weekly sprint work"]),
+          byIssue: [{ issueKey: "PROJ-123", issueSummary: "Weekly sprint work", totalHours: 40, entryCount: 5 }],
+          summary: { totalHours: 40, totalEntries: 5, uniqueIssues: 1 },
+          schedule: generateSchedule("2026-01-06", "2026-01-10")
+        }
+      },
+      schedule: {
+        singleMonth: {
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          days: generateSchedule("2026-01-01", "2026-01-31"),
+          summary: { workingDays: 20, totalRequiredHours: 160 }
+        },
+        multiMonth: {
+          startDate: "2026-01-01",
+          endDate: "2026-03-31",
+          days: generateSchedule("2026-01-01", "2026-03-31"),
+          summary: { workingDays: 64, totalRequiredHours: 512 }
+        },
+        partialMonth: {
+          startDate: "2026-01-15",
+          endDate: "2026-02-15",
+          days: generateSchedule("2026-01-15", "2026-02-15"),
+          summary: { workingDays: 23, totalRequiredHours: 184 }
+        },
+        singleWeek: {
+          startDate: "2026-01-05",
+          endDate: "2026-01-11",
+          days: generateSchedule("2026-01-05", "2026-01-11"),
+          summary: { workingDays: 5, totalRequiredHours: 40 }
+        }
+      }
+    };
+
+    // Host style variables (matching basic-host)
+    const HOST_STYLE_VARIABLES = {
+      "--color-text-primary": null,
+      "--color-text-secondary": null,
+      "--color-text-tertiary": null,
+      "--color-background-primary": null,
+      "--color-background-secondary": null,
+      "--color-background-tertiary": null,
+      "--color-border-primary": null,
+      "--color-border-secondary": null,
+      "--color-accent": null,
+      "--border-radius-sm": "4px",
+      "--border-radius-md": "8px",
+      "--font-sans": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+    };
+
+    // Mock MCP Apps host
+    class MockHost {
+      constructor(iframe, toolResult, theme = "light") {
+        this.iframe = iframe;
+        this.toolResult = toolResult;
+        this.theme = theme;
+        this.messageHandler = this.handleMessage.bind(this);
+        window.addEventListener("message", this.messageHandler);
+      }
+
+      handleMessage(event) {
+        if (event.source !== this.iframe.contentWindow) return;
+
+        const { method, id, params } = event.data || {};
+
+        if (method === "ui/initialize") {
+          // Respond to initialization
+          this.iframe.contentWindow.postMessage({
+            jsonrpc: "2.0",
+            id,
+            result: {
+              protocolVersion: "2025-03-26",
+              hostInfo: { name: "TestHarness", version: "1.0.0" },
+              hostCapabilities: { serverTools: true },
+              hostContext: {
+                theme: this.theme,
+                platform: "web",
+                styles: { variables: HOST_STYLE_VARIABLES },
+                containerDimensions: { maxHeight: 6000 },
+                displayMode: "inline",
+                availableDisplayModes: ["inline"]
+              }
+            }
+          }, "*");
+        } else if (method === "ui/notifications/initialized") {
+          // App is ready, send tool input and result
+          setTimeout(() => {
+            this.iframe.contentWindow.postMessage({
+              jsonrpc: "2.0",
+              method: "ui/notifications/tool-input",
+              params: { arguments: {} }
+            }, "*");
+
+            this.iframe.contentWindow.postMessage({
+              jsonrpc: "2.0",
+              method: "ui/notifications/tool-result",
+              params: {
+                content: [{ type: "text", text: JSON.stringify(this.toolResult) }],
+                structuredContent: this.toolResult,
+                isError: false
+              }
+            }, "*");
+          }, 50);
+        } else if (method === "ui/notifications/size-changed") {
+          // Resize iframe based on reported size
+          if (params?.height) {
+            this.iframe.style.height = `${params.height}px`;
+          }
+        }
+      }
+
+      destroy() {
+        window.removeEventListener("message", this.messageHandler);
+      }
+    }
+
+    // Test case configuration
+    const worklogsTests = [
+      { name: "Empty State", data: "empty", theme: "light", width: 600 },
+      { name: "Empty State (Dark)", data: "empty", theme: "dark", width: 600 },
+      { name: "Single Issue", data: "singleIssue", theme: "light", width: 800 },
+      { name: "Single Issue (Dark)", data: "singleIssue", theme: "dark", width: 800 },
+      { name: "Multiple Issues", data: "multipleIssues", theme: "light", width: 800 },
+      { name: "Multiple Issues (Dark)", data: "multipleIssues", theme: "dark", width: 800 },
+      { name: "Under-logged (Orange)", data: "underLogged", theme: "light", width: 800 },
+      { name: "Over-logged (Blue)", data: "overLogged", theme: "light", width: 800 },
+      { name: "Short Range (1 week)", data: "shortRange", theme: "light", width: 500 },
+      { name: "Narrow Viewport", data: "singleIssue", theme: "light", width: 400 },
+    ];
+
+    const scheduleTests = [
+      { name: "Single Month", data: "singleMonth", theme: "light", width: 400 },
+      { name: "Single Month (Dark)", data: "singleMonth", theme: "dark", width: 400 },
+      { name: "Multi-Month (3 months)", data: "multiMonth", theme: "light", width: 400 },
+      { name: "Multi-Month (Dark)", data: "multiMonth", theme: "dark", width: 400 },
+      { name: "Partial Month Span", data: "partialMonth", theme: "light", width: 400 },
+      { name: "Single Week", data: "singleWeek", theme: "light", width: 400 },
+      { name: "Narrow Viewport", data: "singleMonth", theme: "light", width: 300 },
+      { name: "Wide Viewport", data: "singleMonth", theme: "light", width: 600 },
+    ];
+
+    // Create test cases
+    function createTestCase(container, config, uiFile, dataSource) {
+      const testCase = document.createElement("div");
+      testCase.className = `test-case ${config.theme}`;
+      testCase.style.maxWidth = `${config.width}px`;
+
+      const header = document.createElement("div");
+      header.className = "test-header";
+      header.innerHTML = `
+        <span>${config.name}</span>
+        <span class="badge">${config.width}px</span>
+      `;
+
+      const iframeContainer = document.createElement("div");
+      iframeContainer.className = "iframe-container";
+
+      const iframe = document.createElement("iframe");
+      iframe.style.height = "100px"; // Initial height, will be adjusted by size-changed
+      iframe.src = `../dist/ui/${uiFile}`;
+
+      iframeContainer.appendChild(iframe);
+      testCase.appendChild(header);
+      testCase.appendChild(iframeContainer);
+      container.appendChild(testCase);
+
+      // Set up mock host when iframe loads
+      iframe.addEventListener("load", () => {
+        const data = dataSource[config.data];
+        new MockHost(iframe, data, config.theme);
+      });
+    }
+
+    // Initialize tests
+    const worklogsContainer = document.getElementById("worklogs-tests");
+    const scheduleContainer = document.getElementById("schedule-tests");
+
+    worklogsTests.forEach(config => {
+      createTestCase(worklogsContainer, config, "get-worklogs.html", mockData.worklogs);
+    });
+
+    scheduleTests.forEach(config => {
+      createTestCase(scheduleContainer, config, "get-schedule.html", mockData.schedule);
+    });
+  </script>
+</body>
+</html>

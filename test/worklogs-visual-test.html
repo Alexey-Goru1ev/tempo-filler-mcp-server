@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TempoFiller MCP Server - Worklogs UI Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* Claude Desktop simulation */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      background: #212121;
+      color: #e8e8e8;
+      min-height: 100vh;
+    }
+
+    /* Window chrome */
+    .window-chrome {
+      background: #1a1a1a;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-bottom: 1px solid #333;
+      position: relative;
+    }
+    .window-title { font-size: 13px; color: #888; font-weight: 500; }
+    .window-controls {
+      position: absolute;
+      right: 16px;
+      display: flex;
+      gap: 12px;
+      color: #666;
+      font-size: 18px;
+    }
+
+    /* Main chat container */
+    .chat-container {
+      max-width: 850px;
+      margin: 0 auto;
+      padding: 24px 32px 120px 32px;
+    }
+
+    /* User message bubble */
+    .user-message {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 24px;
+    }
+    .user-bubble {
+      background: #3a3a3a;
+      padding: 12px 18px;
+      border-radius: 18px;
+      max-width: 70%;
+      font-size: 15px;
+    }
+
+    /* Assistant response */
+    .assistant-response {
+      margin-bottom: 32px;
+    }
+    .assistant-text {
+      margin-bottom: 16px;
+      color: #e0e0e0;
+    }
+
+    /* MCP Tool Call Card */
+    .tool-card {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .tool-header {
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #333;
+    }
+    .tool-header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .tool-icon {
+      width: 24px;
+      height: 24px;
+      background: #333;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 12px;
+      color: #aaa;
+    }
+    .tool-name {
+      font-weight: 500;
+      color: #ccc;
+      font-size: 14px;
+    }
+    .tool-function {
+      color: #888;
+      font-size: 14px;
+      margin-left: 8px;
+    }
+    .tool-expand {
+      color: #666;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    /* Tool Result Content (the MCP Apps UI) */
+    .tool-content {
+      padding: 16px;
+    }
+
+    /* ========== Worklogs Grid Styles ========== */
+    .wl-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #3a3a3a;
+    }
+    .wl-date-range {
+      font-weight: 600;
+      font-size: 15px;
+      color: #e0e0e0;
+    }
+    .wl-zoom {
+      padding: 4px 10px;
+      border: 1px solid #444;
+      border-radius: 6px;
+      background: #2a2a2a;
+      color: #ccc;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .scroll-container {
+      overflow-x: auto;
+      max-width: 100%;
+      padding-bottom: 8px;
+    }
+    /* Custom scrollbar for dark theme */
+    .scroll-container::-webkit-scrollbar { height: 8px; }
+    .scroll-container::-webkit-scrollbar-track { background: #2a2a2a; border-radius: 4px; }
+    .scroll-container::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+    .scroll-container::-webkit-scrollbar-thumb:hover { background: #666; }
+
+    .wl-table {
+      border-collapse: separate;
+      border-spacing: 3px;
+      font-size: 13px;
+      min-width: 100%;
+    }
+    .wl-table th, .wl-table td {
+      padding: 8px 10px;
+      text-align: center;
+      white-space: nowrap;
+      border-radius: 6px;
+      background: #2a2a2a;
+      color: #ccc;
+    }
+    .wl-table th {
+      background: #333;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      color: #aaa;
+    }
+
+    .sticky-issue {
+      text-align: left !important;
+      min-width: 180px;
+      max-width: 180px;
+      background: #1a1a1a !important;
+    }
+    .sticky-logged {
+      min-width: 70px;
+      font-weight: 500;
+    }
+    th.sticky-issue, th.sticky-logged {
+      background: #333 !important;
+    }
+
+    .issue-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+    }
+    .issue-summary {
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 160px;
+      color: #e0e0e0;
+    }
+    .issue-key {
+      font-size: 11px;
+      color: #888;
+    }
+
+    /* Coverage colors */
+    .coverage-full {
+      background: rgba(34, 197, 94, 0.75) !important;
+      color: white !important;
+      font-weight: 500;
+    }
+    .coverage-under {
+      background: rgba(245, 158, 11, 0.75) !important;
+      color: white !important;
+      font-weight: 500;
+    }
+    .coverage-gap {
+      background: rgba(249, 115, 22, 0.75) !important;
+      color: white !important;
+      font-weight: 500;
+    }
+    .coverage-over {
+      background: rgba(59, 130, 246, 0.75) !important;
+      color: white !important;
+      font-weight: 500;
+    }
+
+    .day-header {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .day-num { font-weight: 500; }
+    .day-name { font-size: 10px; color: #888; font-weight: normal; text-transform: uppercase; }
+    .coverage-full .day-num, .coverage-full .day-name { color: white !important; }
+
+    .total-row td {
+      font-weight: 600;
+      background: #333;
+    }
+    .total-row td.sticky-issue {
+      background: #252525 !important;
+    }
+
+    .wl-footer {
+      margin-top: 12px;
+      padding-top: 8px;
+      font-size: 12px;
+      color: #888;
+      text-align: right;
+    }
+
+    /* ========== Schedule Calendar Styles ========== */
+    .cal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .cal-title {
+      font-weight: 600;
+      font-size: 18px;
+      color: #e0e0e0;
+    }
+    .cal-hours {
+      font-size: 14px;
+      color: #888;
+    }
+
+    .weekday-header {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      margin-bottom: 4px;
+    }
+    .weekday-label {
+      text-align: center;
+      font-size: 12px;
+      font-weight: 500;
+      color: #888;
+      padding: 8px 0;
+    }
+
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+    .cal-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 4px;
+      border-radius: 6px;
+      min-height: 52px;
+      font-size: 14px;
+    }
+    .cal-cell.empty {
+      background: transparent;
+    }
+    .cal-cell.working {
+      background: rgba(34, 197, 94, 0.75);
+      color: white;
+    }
+    .cal-cell.non-working {
+      background: #2a2a2a;
+      color: #666;
+    }
+    .cal-cell .day-number {
+      font-weight: 500;
+      font-size: 15px;
+    }
+    .cal-cell .day-hours {
+      font-size: 11px;
+      margin-top: 2px;
+      opacity: 0.9;
+    }
+
+    .cal-legend {
+      display: flex;
+      gap: 24px;
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid #333;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #999;
+    }
+    .legend-swatch {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+    }
+    .legend-swatch.working {
+      background: rgba(34, 197, 94, 0.75);
+    }
+    .legend-swatch.non-working {
+      background: #2a2a2a;
+      border: 1px solid #444;
+    }
+
+    /* Summary text after tool result */
+    .summary-text {
+      margin-top: 16px;
+      line-height: 1.7;
+      color: #ccc;
+    }
+    .summary-text strong {
+      color: #e8e8e8;
+    }
+
+    /* Footer disclaimer */
+    .footer-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #1a1a1a;
+      border-top: 1px solid #333;
+      padding: 16px 24px;
+    }
+    .input-area {
+      max-width: 850px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .input-box {
+      flex: 1;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 20px;
+      padding: 10px 18px;
+      color: #888;
+      font-size: 14px;
+    }
+    .disclaimer {
+      text-align: center;
+      font-size: 12px;
+      color: #666;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Window chrome -->
+  <div class="window-chrome">
+    <span class="window-title">Claude</span>
+    <div class="window-controls">
+      <span>-</span>
+      <span>[]</span>
+      <span>x</span>
+    </div>
+  </div>
+
+  <!-- Chat content -->
+  <div class="chat-container">
+    <!-- User message -->
+    <div class="user-message">
+      <div class="user-bubble">What are my hours in tempo for jan 2026?</div>
+    </div>
+
+    <!-- Assistant response -->
+    <div class="assistant-response">
+      <div class="assistant-text">I'll check your Tempo worklogs for January 2026.</div>
+
+      <!-- MCP Tool Card -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-header-left">
+            <div class="tool-icon">T</div>
+            <span class="tool-name">TempoFiller MCP Server</span>
+            <span class="tool-function">get_worklogs</span>
+          </div>
+          <span class="tool-expand">&lt;/&gt;</span>
+        </div>
+        <div class="tool-content" id="worklogs-grid"></div>
+      </div>
+
+      <!-- Summary text -->
+      <div class="summary-text">
+        For January 2026, you've logged <strong>160 hours</strong> in Tempo across 20 working days, split between three projects:
+        <ul style="margin: 12px 0 12px 24px; color: #bbb;">
+          <li><strong>PROJ-100</strong> (API Backend Development): 80 hours</li>
+          <li><strong>PROJ-200</strong> (Frontend Dashboard): 50 hours</li>
+          <li><strong>PROJ-300</strong> (DevOps & Infrastructure): 30 hours</li>
+        </ul>
+        You've been consistently logging 8 hours per working day. There are 20 working days in January 2026, and you've logged time for all of them, which matches your schedule perfectly.
+      </div>
+    </div>
+
+    <!-- Second conversation: Schedule -->
+    <div class="user-message">
+      <div class="user-bubble">what's my schedule for feb 2026?</div>
+    </div>
+
+    <div class="assistant-response">
+      <div class="assistant-text">I'll check your work schedule for February 2026.</div>
+
+      <!-- MCP Tool Card -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-header-left">
+            <div class="tool-icon">T</div>
+            <span class="tool-name">TempoFiller MCP Server</span>
+            <span class="tool-function">get_schedule</span>
+          </div>
+          <span class="tool-expand">&lt;/&gt;</span>
+        </div>
+        <div class="tool-content" id="schedule-calendar"></div>
+      </div>
+
+      <!-- Summary text -->
+      <div class="summary-text">
+        For February 2026, you have <strong>19 working days</strong> with a total of <strong>152 required hours</strong> (8 hours per working day).
+        <br><br>
+        Here's the breakdown:
+        <ul style="margin: 12px 0 12px 24px; color: #bbb;">
+          <li><strong>Working days:</strong> 19 days (Monday-Friday, except Feb 16 which is a holiday - likely Presidents' Day)</li>
+          <li><strong>Non-working days:</strong> 9 days (weekends + the Feb 16 holiday)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer-bar">
+    <div class="input-area">
+      <div class="input-box">Reply...</div>
+    </div>
+    <div class="disclaimer">Claude is AI and can make mistakes. Please double-check responses.</div>
+  </div>
+
+  <script>
+    // Helper functions
+    function formatDate(d) {
+      return new Date(d + 'T00:00:00').toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function truncate(s, len) {
+      return s.length > len ? s.substring(0, len - 3) + '...' : s;
+    }
+
+    function formatHours(hours) {
+      const rounded = Math.round(hours * 10) / 10;
+      return rounded % 1 === 0 ? String(rounded) : rounded.toFixed(1);
+    }
+
+    function getCoverageClass(logged, required) {
+      if (required === 0 && logged === 0) return 'coverage-non-working';
+      if (logged === 0 && required > 0) return 'coverage-gap';
+      if (logged > 0 && logged < required) return 'coverage-under';
+      if (logged === required) return 'coverage-full';
+      if (logged > required) return 'coverage-over';
+      return '';
+    }
+
+    function generateSchedule(startDate, endDate) {
+      const days = [];
+      const start = new Date(startDate + "T00:00:00");
+      const end = new Date(endDate + "T00:00:00");
+      const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dayOfWeek = d.getDay();
+        const isWorkingDay = dayOfWeek >= 1 && dayOfWeek <= 5;
+        days.push({
+          date: d.toISOString().split("T")[0],
+          dayOfWeek: dayNames[dayOfWeek],
+          requiredHours: isWorkingDay ? 8 : 0,
+          isWorkingDay
+        });
+      }
+      return days;
+    }
+
+    // Generate worklogs with multiple projects split per day
+    function generateMultiProjectWorklogs() {
+      const worklogs = [];
+      const schedule = generateSchedule("2026-01-01", "2026-01-31");
+      let id = 1000;
+
+      const projects = [
+        { key: "PROJ-100", summary: "API Backend Development", hoursPerDay: 4 },
+        { key: "PROJ-200", summary: "Frontend Dashboard", hoursPerDay: 2.5 },
+        { key: "PROJ-300", summary: "DevOps & Infrastructure", hoursPerDay: 1.5 }
+      ];
+
+      for (const day of schedule) {
+        if (day.isWorkingDay) {
+          for (const proj of projects) {
+            worklogs.push({
+              id: String(id++),
+              issueKey: proj.key,
+              issueSummary: proj.summary,
+              date: day.date,
+              hours: proj.hoursPerDay,
+              comment: ""
+            });
+          }
+        }
+      }
+
+      return worklogs;
+    }
+
+    function aggregateByIssue(worklogs) {
+      const map = new Map();
+      for (const w of worklogs) {
+        const existing = map.get(w.issueKey);
+        if (existing) {
+          existing.totalHours += w.hours;
+          existing.entryCount++;
+        } else {
+          map.set(w.issueKey, {
+            issueKey: w.issueKey,
+            issueSummary: w.issueSummary,
+            totalHours: w.hours,
+            entryCount: 1
+          });
+        }
+      }
+      return Array.from(map.values());
+    }
+
+    // Render the grid
+    function renderWorklogGrid(container, data) {
+      const workingDays = data.schedule.filter(d => d.isWorkingDay);
+      const displayLimit = Math.min(workingDays.length, 10); // Show first 10 days
+      const dates = workingDays.slice(0, displayLimit).map(d => d.date);
+
+      const totalRequired = workingDays.reduce((sum, d) => sum + d.requiredHours, 0);
+      const totalLoggedCls = getCoverageClass(data.summary.totalHours, totalRequired);
+
+      function getDayTotals(date) {
+        return data.worklogs.filter(w => w.date === date).reduce((sum, w) => sum + w.hours, 0);
+      }
+
+      function getRequiredForDay(date) {
+        const day = data.schedule.find(d => d.date === date);
+        return day ? day.requiredHours : 0;
+      }
+
+      let html = `
+        <div class="wl-header">
+          <span class="wl-date-range">${formatDate(data.startDate)} - ${formatDate(data.endDate)}</span>
+          <select class="wl-zoom"><option>Days</option><option>Weeks</option><option>Months</option></select>
+        </div>
+        <div class="scroll-container">
+          <table class="wl-table">
+            <thead><tr>
+              <th class="sticky-issue">Issue</th>
+              <th class="sticky-logged ${totalLoggedCls}">Logged</th>
+              ${dates.map(d => {
+                const logged = getDayTotals(d);
+                const required = getRequiredForDay(d);
+                const cls = getCoverageClass(logged, required);
+                const date = new Date(d + 'T00:00:00');
+                const day = String(date.getDate()).padStart(2, '0');
+                const weekday = date.toLocaleDateString('en', { weekday: 'short' }).toUpperCase();
+                return `<th class="${cls}"><div class="day-header"><span class="day-num">${day}</span><span class="day-name">${weekday}</span></div></th>`;
+              }).join('')}
+            </tr></thead>
+            <tbody>
+      `;
+
+      // Issue rows
+      for (const issue of data.byIssue) {
+        const issueWorklogs = data.worklogs.filter(w => w.issueKey === issue.issueKey);
+        html += `<tr>
+          <td class="sticky-issue"><div class="issue-cell"><span class="issue-summary">${truncate(issue.issueSummary, 22)}</span><span class="issue-key">${issue.issueKey}</span></div></td>
+          <td class="sticky-logged">${formatHours(issue.totalHours)}</td>
+          ${dates.map(d => {
+            const hours = issueWorklogs.filter(w => w.date === d).reduce((sum, w) => sum + w.hours, 0);
+            return `<td>${hours > 0 ? formatHours(hours) : ''}</td>`;
+          }).join('')}
+        </tr>`;
+      }
+
+      // Total row
+      html += `<tr class="total-row">
+        <td class="sticky-issue">Total</td>
+        <td class="sticky-logged ${totalLoggedCls}">${formatHours(data.summary.totalHours)}/${formatHours(totalRequired)}</td>
+        ${dates.map(d => {
+          const logged = getDayTotals(d);
+          const required = getRequiredForDay(d);
+          const cls = getCoverageClass(logged, required);
+          return `<td class="${cls}">${formatHours(logged)}/${formatHours(required)}</td>`;
+        }).join('')}
+      </tr>`;
+
+      html += '</tbody></table></div>';
+      html += `<div class="wl-footer">Found ${data.worklogs.length} worklogs across ${data.summary.uniqueIssues} issues</div>`;
+
+      container.innerHTML = html;
+    }
+
+    // Initialize with mock data
+    const worklogs = generateMultiProjectWorklogs();
+    const byIssue = aggregateByIssue(worklogs);
+    const schedule = generateSchedule("2026-01-01", "2026-01-31");
+
+    const mockData = {
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      worklogs,
+      byIssue,
+      summary: {
+        totalHours: 160,
+        totalEntries: worklogs.length,
+        uniqueIssues: 3
+      },
+      schedule
+    };
+
+    renderWorklogGrid(document.getElementById('worklogs-grid'), mockData);
+
+    // ========== Schedule Calendar ==========
+    function generateScheduleWithHoliday(startDate, endDate, holidays = []) {
+      const days = [];
+      const start = new Date(startDate + "T00:00:00");
+      const end = new Date(endDate + "T00:00:00");
+      const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split("T")[0];
+        const dayOfWeek = d.getDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const isHoliday = holidays.includes(dateStr);
+        const isWorkingDay = !isWeekend && !isHoliday;
+
+        days.push({
+          date: dateStr,
+          dayOfWeek: dayNames[dayOfWeek],
+          requiredHours: isWorkingDay ? 8 : 0,
+          isWorkingDay
+        });
+      }
+      return days;
+    }
+
+    function renderScheduleCalendar(container, scheduleData) {
+      const days = scheduleData.days;
+      const workingDays = days.filter(d => d.isWorkingDay).length;
+      const nonWorkingDays = days.length - workingDays;
+      const totalHours = days.reduce((sum, d) => sum + d.requiredHours, 0);
+
+      // Get month name
+      const firstDay = new Date(days[0].date + "T00:00:00");
+      const monthName = firstDay.toLocaleDateString('en', { month: 'long', year: 'numeric' });
+
+      // Calculate start padding (days before the 1st)
+      const startPadding = firstDay.getDay(); // Sunday = 0
+
+      let html = `
+        <div class="cal-header">
+          <span class="cal-title">${monthName}</span>
+          <span class="cal-hours">${totalHours}h required</span>
+        </div>
+        <div class="weekday-header">
+          <span class="weekday-label">Su</span>
+          <span class="weekday-label">Mo</span>
+          <span class="weekday-label">Tu</span>
+          <span class="weekday-label">We</span>
+          <span class="weekday-label">Th</span>
+          <span class="weekday-label">Fr</span>
+          <span class="weekday-label">Sa</span>
+        </div>
+        <div class="cal-grid">
+      `;
+
+      // Empty cells for padding
+      for (let i = 0; i < startPadding; i++) {
+        html += '<div class="cal-cell empty"></div>';
+      }
+
+      // Day cells
+      for (const day of days) {
+        const date = new Date(day.date + "T00:00:00");
+        const dayNum = date.getDate();
+        const cls = day.isWorkingDay ? 'working' : 'non-working';
+        const hoursLabel = day.isWorkingDay ? `<span class="day-hours">${day.requiredHours}h</span>` : '';
+
+        html += `<div class="cal-cell ${cls}">
+          <span class="day-number">${dayNum}</span>
+          ${hoursLabel}
+        </div>`;
+      }
+
+      html += '</div>';
+
+      // Legend
+      html += `
+        <div class="cal-legend">
+          <div class="legend-item">
+            <div class="legend-swatch working"></div>
+            <span>Working (${workingDays} days)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-swatch non-working"></div>
+            <span>Non-working (${nonWorkingDays} days)</span>
+          </div>
+        </div>
+      `;
+
+      container.innerHTML = html;
+    }
+
+    // February 2026 schedule with Presidents' Day holiday (Feb 16)
+    const febSchedule = {
+      days: generateScheduleWithHoliday("2026-02-01", "2026-02-28", ["2026-02-16"])
+    };
+
+    renderScheduleCalendar(document.getElementById('schedule-calendar'), febSchedule);
+  </script>
+</body>
+</html>

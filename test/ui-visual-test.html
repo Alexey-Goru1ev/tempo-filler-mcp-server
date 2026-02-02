@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TempoFiller UI Visual Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      background: #f5f5f5;
+      padding: 16px;
+    }
+    h1 { font-size: 20px; margin-bottom: 16px; color: #333; }
+    h2 { font-size: 16px; margin: 24px 0 12px 0; color: #555; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+    .test-grid { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
+    .test-case { background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+    .test-case.dark { background: #1a1a1a; border-color: #333; }
+    .test-header {
+      padding: 8px 12px; background: #f0f0f0; border-bottom: 1px solid #ddd;
+      font-size: 12px; font-weight: 600; color: #666;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .test-case.dark .test-header { background: #2a2a2a; border-color: #444; color: #aaa; }
+    .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #e0e0e0; color: #666; }
+    .test-case.dark .badge { background: #444; color: #ccc; }
+    .ui-container { padding: 8px; padding-bottom: 24px; }
+    .test-case.dark .ui-container { color: #e0e0e0; }
+
+    /* Inline copies of our UI styles for direct rendering */
+    .wl-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #e0e0e0; }
+    .test-case.dark .wl-header { border-color: #444; }
+    .wl-date-range { font-weight: 600; font-size: 15px; }
+    .wl-zoom { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; background: white; font-size: 13px; }
+    .test-case.dark .wl-zoom { background: #333; color: #e0e0e0; border-color: #555; }
+    .wl-grid { overflow-x: auto; }
+    .wl-table { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+    .wl-table th, .wl-table td { padding: 6px 8px; text-align: center; border: 1px solid #e0e0e0; white-space: nowrap; }
+    .test-case.dark .wl-table th, .test-case.dark .wl-table td { border-color: #444; }
+    .wl-table th { background: #fafafa; font-weight: 500; font-size: 12px; }
+    .test-case.dark .wl-table th { background: #2a2a2a; }
+    .sticky-issue { text-align: left; min-width: 160px; max-width: 160px; }
+    .sticky-logged { min-width: 50px; }
+    .issue-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+    .issue-summary { font-weight: 500; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+    .issue-key { font-size: 11px; color: #666; }
+    .test-case.dark .issue-key { color: #999; }
+    .non-working { background: rgba(128, 128, 128, 0.1) !important; color: #999 !important; }
+    .coverage-full { background: rgba(76, 175, 80, 0.2) !important; }
+    .coverage-under { background: rgba(255, 152, 0, 0.2) !important; }
+    .coverage-gap { background: rgba(244, 67, 54, 0.2) !important; }
+    .coverage-over { background: rgba(33, 150, 243, 0.2) !important; }
+    .total-row td { font-weight: 600; border-top: 2px solid #bdbdbd; }
+    .day-header { display: flex; flex-direction: column; gap: 1px; }
+    .day-num { font-weight: 500; }
+    .day-name { font-size: 10px; color: #888; font-weight: normal; }
+    .empty-state { padding: 32px; text-align: center; color: #666; font-size: 14px; }
+    .wl-footer { margin-top: 12px; padding-top: 8px; font-size: 12px; color: #666; text-align: right; }
+    .test-case.dark .wl-footer { color: #999; }
+
+    /* Calendar styles */
+    .cal-container { margin-bottom: 16px; }
+    .cal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding: 8px 4px; border-bottom: 1px solid #e0e0e0; }
+    .test-case.dark .cal-header { border-color: #444; }
+    .cal-title { font-weight: 600; font-size: 16px; }
+    .cal-hours { font-size: 13px; color: #666; }
+    .test-case.dark .cal-hours { color: #999; }
+    .weekday-header { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin-bottom: 4px; }
+    .weekday-label { text-align: center; font-size: 11px; font-weight: 500; color: #666; padding: 4px 0; }
+    .test-case.dark .weekday-label { color: #999; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .day-cell { display: flex; align-items: center; justify-content: center; font-size: 13px; border-radius: 4px; padding: 8px 4px; min-height: 32px; }
+    .day-cell.empty { background: transparent; }
+    .day-cell.working { background: rgba(33, 150, 243, 0.2); }
+    .day-cell.non-working { background: rgba(128, 128, 128, 0.1); color: #9e9e9e; }
+    .day-cell.today { border: 2px solid #1976d2; font-weight: 600; }
+    .legend { display: flex; gap: 16px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666; }
+    .test-case.dark .legend { border-color: #444; color: #999; }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-swatch { width: 14px; height: 14px; border-radius: 3px; }
+    .legend-swatch.working { background: rgba(33, 150, 243, 0.2); }
+    .legend-swatch.non-working { background: rgba(128, 128, 128, 0.1); }
+  </style>
+</head>
+<body>
+  <h1>TempoFiller UI Visual Test</h1>
+
+  <h2>get_worklogs - Timesheet Grid</h2>
+  <div class="test-grid" id="worklogs-tests"></div>
+
+  <h2>get_schedule - Calendar</h2>
+  <div class="test-grid" id="schedule-tests"></div>
+
+  <script>
+    // Render worklog grid directly
+    function renderWorklogGrid(container, data, width) {
+      container.style.width = `${width}px`;
+
+      if (!data.worklogs || data.worklogs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No worklogs found for this period</div>';
+        return;
+      }
+
+      // Get unique dates from schedule
+      const dates = data.schedule.filter(d => d.isWorkingDay).map(d => d.date).slice(0, 15);
+
+      let html = `
+        <div class="wl-header">
+          <span class="wl-date-range">${formatDate(data.startDate)} - ${formatDate(data.endDate)}</span>
+          <select class="wl-zoom"><option>Days</option></select>
+        </div>
+        <div class="wl-grid">
+          <table class="wl-table">
+            <thead><tr>
+              <th class="sticky-issue">Issue</th>
+              <th class="sticky-logged">Logged</th>
+              ${dates.map(d => `<th><div class="day-header"><span class="day-num">${new Date(d+'T00:00:00').getDate()}</span><span class="day-name">${new Date(d+'T00:00:00').toLocaleDateString('en', {weekday:'short'})}</span></div></th>`).join('')}
+            </tr></thead>
+            <tbody>
+      `;
+
+      // Issue rows
+      for (const issue of data.byIssue) {
+        html += `<tr>
+          <td class="sticky-issue"><div class="issue-cell"><span class="issue-summary">${truncate(issue.issueSummary, 25)}</span><span class="issue-key">${issue.issueKey}</span></div></td>
+          <td class="sticky-logged">${issue.totalHours}</td>
+          ${dates.map(d => {
+            const hours = getHoursForDay(data.worklogs, issue.issueKey, d);
+            return `<td>${hours > 0 ? hours : ''}</td>`;
+          }).join('')}
+        </tr>`;
+      }
+
+      // Total row - calculate total required hours
+      const totalRequired = data.schedule.filter(d => d.isWorkingDay).reduce((sum, d) => sum + d.requiredHours, 0);
+      const totalCls = getCoverageClass(data.summary.totalHours, totalRequired);
+      html += `<tr class="total-row">
+        <td class="sticky-issue">Total</td>
+        <td class="sticky-logged ${totalCls}">${data.summary.totalHours}/${totalRequired}</td>
+        ${dates.map(d => {
+          const logged = getTotalForDay(data.worklogs, d);
+          const required = getRequiredForDay(data.schedule, d);
+          const cls = getCoverageClass(logged, required);
+          return `<td class="${cls}">${logged}/${required}</td>`;
+        }).join('')}
+      </tr>`;
+
+      html += '</tbody></table></div>';
+
+      // Footer with record count
+      const uniqueIssues = data.byIssue.length;
+      html += `<div class="wl-footer">Found ${data.worklogs.length} worklog${data.worklogs.length === 1 ? '' : 's'} across ${uniqueIssues} issue${uniqueIssues === 1 ? '' : 's'}</div>`;
+
+      container.innerHTML = html;
+    }
+
+    // Render calendar directly
+    function renderCalendar(container, data, width) {
+      container.style.width = `${width}px`;
+
+      // Group days by month
+      const months = {};
+      for (const day of data.days) {
+        const [year, month] = day.date.split('-');
+        const key = `${year}-${month}`;
+        if (!months[key]) months[key] = [];
+        months[key].push(day);
+      }
+
+      let html = '';
+      for (const [monthKey, days] of Object.entries(months)) {
+        const [year, month] = monthKey.split('-');
+        const monthName = new Date(year, parseInt(month) - 1, 1).toLocaleDateString('en', { month: 'long', year: 'numeric' });
+        const totalHours = days.reduce((sum, d) => sum + d.requiredHours, 0);
+
+        // Get first day of week for padding
+        const firstDay = new Date(days[0].date + 'T00:00:00');
+        const startPadding = (firstDay.getDay() + 6) % 7; // Monday = 0
+
+        html += `
+          <div class="cal-container">
+            <div class="cal-header">
+              <span class="cal-title">${monthName}</span>
+              <span class="cal-hours">${totalHours}h required</span>
+            </div>
+            <div class="weekday-header">
+              <span class="weekday-label">Mo</span>
+              <span class="weekday-label">Tu</span>
+              <span class="weekday-label">We</span>
+              <span class="weekday-label">Th</span>
+              <span class="weekday-label">Fr</span>
+              <span class="weekday-label">Sa</span>
+              <span class="weekday-label">Su</span>
+            </div>
+            <div class="cal-grid">
+              ${Array(startPadding).fill('<div class="day-cell empty"></div>').join('')}
+              ${days.map(d => {
+                const dayNum = new Date(d.date + 'T00:00:00').getDate();
+                const cls = d.isWorkingDay ? 'working' : 'non-working';
+                return `<div class="day-cell ${cls}">${dayNum}</div>`;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      html += `
+        <div class="legend">
+          <div class="legend-item"><div class="legend-swatch working"></div>Working</div>
+          <div class="legend-item"><div class="legend-swatch non-working"></div>Non-working</div>
+        </div>
+      `;
+
+      container.innerHTML = html;
+    }
+
+    // Helper functions
+    function formatDate(d) {
+      return new Date(d + 'T00:00:00').toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    function truncate(s, len) { return s.length > len ? s.substring(0, len - 3) + '...' : s; }
+    function getHoursForDay(worklogs, issueKey, date) {
+      return worklogs.filter(w => w.issueKey === issueKey && w.date === date).reduce((sum, w) => sum + w.hours, 0);
+    }
+    function getTotalForDay(worklogs, date) {
+      return worklogs.filter(w => w.date === date).reduce((sum, w) => sum + w.hours, 0);
+    }
+    function getRequiredForDay(schedule, date) {
+      const day = schedule.find(d => d.date === date);
+      return day ? day.requiredHours : 0;
+    }
+    function getCoverageClass(logged, required) {
+      if (required === 0 && logged === 0) return 'non-working';
+      if (logged === 0 && required > 0) return 'coverage-gap';
+      if (logged > 0 && logged < required) return 'coverage-under';
+      if (logged === required) return 'coverage-full';
+      if (logged > required) return 'coverage-over';
+      return '';
+    }
+    function generateSchedule(startDate, endDate) {
+      const days = [];
+      const start = new Date(startDate + "T00:00:00");
+      const end = new Date(endDate + "T00:00:00");
+      const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dayOfWeek = d.getDay();
+        const isWorkingDay = dayOfWeek >= 1 && dayOfWeek <= 5;
+        days.push({ date: d.toISOString().split("T")[0], dayOfWeek: dayNames[dayOfWeek], requiredHours: isWorkingDay ? 8 : 0, isWorkingDay });
+      }
+      return days;
+    }
+    function generateWorklogs(issueKeys, startDate, endDate, hoursPerDay, summaries) {
+      const worklogs = [];
+      const start = new Date(startDate + "T00:00:00");
+      const end = new Date(endDate + "T00:00:00");
+      let id = 1;
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dayOfWeek = d.getDay();
+        if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+          for (let i = 0; i < issueKeys.length; i++) {
+            worklogs.push({ id: String(id++), issueKey: issueKeys[i], issueSummary: summaries?.[i] || "Task", date: d.toISOString().split("T")[0], hours: hoursPerDay / issueKeys.length, comment: "" });
+          }
+        }
+      }
+      return worklogs;
+    }
+
+    // Test data
+    const worklogsTestCases = [
+      { name: "Empty State", theme: "light", width: 500, data: { startDate: "2026-01-01", endDate: "2026-01-31", worklogs: [], byIssue: [], summary: { totalHours: 0, uniqueIssues: 0 }, schedule: generateSchedule("2026-01-01", "2026-01-31") }},
+      { name: "Empty State (Dark)", theme: "dark", width: 500, data: { startDate: "2026-01-01", endDate: "2026-01-31", worklogs: [], byIssue: [], summary: { totalHours: 0, uniqueIssues: 0 }, schedule: generateSchedule("2026-01-01", "2026-01-31") }},
+      { name: "Single Issue", theme: "light", width: 700, data: { startDate: "2026-01-01", endDate: "2026-01-31", worklogs: generateWorklogs(["PROJ-123"], "2026-01-01", "2026-01-31", 8, ["Implement authentication"]), byIssue: [{ issueKey: "PROJ-123", issueSummary: "Implement user authentication flow", totalHours: 160 }], summary: { totalHours: 160, uniqueIssues: 1 }, schedule: generateSchedule("2026-01-01", "2026-01-31") }},
+      { name: "Single Issue (Dark)", theme: "dark", width: 700, data: { startDate: "2026-01-01", endDate: "2026-01-31", worklogs: generateWorklogs(["PROJ-123"], "2026-01-01", "2026-01-31", 8, ["Implement authentication"]), byIssue: [{ issueKey: "PROJ-123", issueSummary: "Implement user authentication flow", totalHours: 160 }], summary: { totalHours: 160, uniqueIssues: 1 }, schedule: generateSchedule("2026-01-01", "2026-01-31") }},
+      { name: "Multiple Issues", theme: "light", width: 700, data: { startDate: "2026-01-01", endDate: "2026-01-31", worklogs: [...generateWorklogs(["PROJ-123"], "2026-01-01", "2026-01-15", 4, ["Auth flow"]), ...generateWorklogs(["PROJ-456"], "2026-01-01", "2026-01-31", 4, ["DB migration"])], byIssue: [{ issueKey: "PROJ-123", issueSummary: "Implement authentication flow", totalHours: 40 }, { issueKey: "PROJ-456", issueSummary: "Database migration tasks", totalHours: 80 }], summary: { totalHours: 120, uniqueIssues: 2 }, schedule: generateSchedule("2026-01-01", "2026-01-31") }},
+      { name: "Under-logged", theme: "light", width: 700, data: { startDate: "2026-01-01", endDate: "2026-01-31", worklogs: generateWorklogs(["PROJ-123"], "2026-01-01", "2026-01-31", 4, ["Part-time work"]), byIssue: [{ issueKey: "PROJ-123", issueSummary: "Part-time project work", totalHours: 80 }], summary: { totalHours: 80, uniqueIssues: 1 }, schedule: generateSchedule("2026-01-01", "2026-01-31") }},
+      { name: "Over-logged", theme: "light", width: 700, data: { startDate: "2026-01-01", endDate: "2026-01-31", worklogs: generateWorklogs(["PROJ-123"], "2026-01-01", "2026-01-31", 10, ["Overtime work"]), byIssue: [{ issueKey: "PROJ-123", issueSummary: "Overtime project work", totalHours: 200 }], summary: { totalHours: 200, uniqueIssues: 1 }, schedule: generateSchedule("2026-01-01", "2026-01-31") }},
+      { name: "Short Range", theme: "light", width: 450, data: { startDate: "2026-01-06", endDate: "2026-01-10", worklogs: generateWorklogs(["PROJ-123"], "2026-01-06", "2026-01-10", 8, ["Sprint work"]), byIssue: [{ issueKey: "PROJ-123", issueSummary: "Weekly sprint", totalHours: 40 }], summary: { totalHours: 40, uniqueIssues: 1 }, schedule: generateSchedule("2026-01-06", "2026-01-10") }},
+    ];
+
+    const scheduleTestCases = [
+      { name: "Single Month", theme: "light", width: 350, data: { days: generateSchedule("2026-01-01", "2026-01-31") }},
+      { name: "Single Month (Dark)", theme: "dark", width: 350, data: { days: generateSchedule("2026-01-01", "2026-01-31") }},
+      { name: "Multi-Month", theme: "light", width: 350, data: { days: generateSchedule("2026-01-01", "2026-03-31") }},
+      { name: "Multi-Month (Dark)", theme: "dark", width: 350, data: { days: generateSchedule("2026-01-01", "2026-03-31") }},
+      { name: "Single Week", theme: "light", width: 350, data: { days: generateSchedule("2026-01-05", "2026-01-11") }},
+      { name: "Narrow (300px)", theme: "light", width: 300, data: { days: generateSchedule("2026-01-01", "2026-01-31") }},
+      { name: "Wide (500px)", theme: "light", width: 500, data: { days: generateSchedule("2026-01-01", "2026-01-31") }},
+    ];
+
+    // Create test cases
+    function createTestCase(container, config, renderFn) {
+      const testCase = document.createElement('div');
+      testCase.className = `test-case ${config.theme}`;
+
+      const header = document.createElement('div');
+      header.className = 'test-header';
+      header.innerHTML = `<span>${config.name}</span><span class="badge">${config.width}px</span>`;
+
+      const uiContainer = document.createElement('div');
+      uiContainer.className = 'ui-container';
+
+      testCase.appendChild(header);
+      testCase.appendChild(uiContainer);
+      container.appendChild(testCase);
+
+      renderFn(uiContainer, config.data, config.width);
+    }
+
+    // Initialize
+    const worklogsContainer = document.getElementById('worklogs-tests');
+    const scheduleContainer = document.getElementById('schedule-tests');
+
+    worklogsTestCases.forEach(c => createTestCase(worklogsContainer, c, renderWorklogGrid));
+    scheduleTestCases.forEach(c => createTestCase(scheduleContainer, c, renderCalendar));
+  </script>
+</body>
+</html>
