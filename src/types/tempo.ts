@@ -87,6 +87,17 @@ export interface TempoWorklogCreatePayload {
   comment?: string;             // Worklog description/comment
 }
 
+// Tempo REST API v4 worklog creation payload (for Atlassian Cloud)
+export interface TempoV4WorklogCreatePayload {
+  authorAccountId: string;
+  issueId: number;
+  timeSpentSeconds: number;
+  billableSeconds?: number;
+  startDate: string;       // YYYY-MM-DD
+  startTime?: string;      // HH:mm:ss
+  description?: string;
+}
+
 // Error response from Tempo API
 export interface TempoApiError {
   error?: string;

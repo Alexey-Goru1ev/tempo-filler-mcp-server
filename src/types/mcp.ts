@@ -101,8 +101,9 @@ export const RESOURCE_NAMES = {
 // Environment variable names
 export const ENV_VARS = {
   TEMPO_BASE_URL: "TEMPO_BASE_URL",
-  TEMPO_PAT: "TEMPO_PAT", 
+  TEMPO_PAT: "TEMPO_PAT",
   TEMPO_DEFAULT_HOURS: "TEMPO_DEFAULT_HOURS",
+  TEMPO_ACCOUNT_ID: "TEMPO_ACCOUNT_ID",
 } as const;
 
 // Default configuration values

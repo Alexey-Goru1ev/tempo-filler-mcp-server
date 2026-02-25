@@ -3,6 +3,7 @@ import {
   JiraIssue,
   TempoWorklogResponse,
   TempoWorklogCreatePayload,
+  TempoV4WorklogCreatePayload,
   TempoClientConfig,
   IssueCache,
   TempoApiError,
@@ -18,7 +19,7 @@ export class TempoClient {
 
   constructor(config: TempoClientConfig) {
     this.config = config;
-    
+
     // Create axios instance with PAT authentication
     this.axiosInstance = axios.create({
       baseURL: config.baseUrl,
@@ -35,7 +36,6 @@ export class TempoClient {
     this.axiosInstance.interceptors.request.use(
       (config) => {
         console.error(`DEBUG: Making ${config.method?.toUpperCase()} request to ${config.baseURL}${config.url}`);
-        console.error(`DEBUG: Headers:`, JSON.stringify(config.headers, null, 2));
         if (config.data) {
           console.error(`DEBUG: Request body:`, JSON.stringify(config.data, null, 2));
         }
@@ -66,36 +66,46 @@ export class TempoClient {
         if (error.response?.status === 429) {
           throw new Error('Rate limit exceeded. Please try again later.');
         }
-        
+
         const apiError: TempoApiError = error.response?.data;
         if (apiError?.message) {
           throw new Error(`Tempo API Error: ${apiError.message}`);
         }
-        
+
         throw error;
       }
     );
   }
 
   /**
-   * Get the current authenticated user from JIRA
-   * Caches the result to avoid repeated API calls
+   * Get the current authenticated user.
+   * On Atlassian Cloud, uses the TEMPO_ACCOUNT_ID env var since the Jira
+   * REST API does not accept Tempo PATs. Falls back to the legacy Jira
+   * /rest/api/latest/myself call for Server/Data Center deployments.
    */
   private async getCurrentUser(): Promise<string> {
     if (this.currentUser) {
       return this.currentUser;
     }
 
+    // Atlassian Cloud: use account ID from env var
+    const envAccountId = process.env.TEMPO_ACCOUNT_ID;
+    if (envAccountId) {
+      this.currentUser = envAccountId;
+      console.error(`🔐 AUTHENTICATED USER (from env): ${this.currentUser}`);
+      return this.currentUser;
+    }
+
+    // Server/Data Center fallback: call Jira API
     try {
       const response = await this.axiosInstance.get('/rest/api/latest/myself');
-      // Use the username (name field) for Tempo API
       this.currentUser = response.data.key;
       console.error(`🔐 AUTHENTICATED USER: ${this.currentUser}`);
-      
+
       if (!this.currentUser) {
         throw new Error('Unable to determine current user from API response');
       }
-      
+
       return this.currentUser;
     } catch (error) {
       throw new Error(`Failed to get current user: ${error instanceof Error ? error.message : String(error)}`);
@@ -103,29 +113,46 @@ export class TempoClient {
   }
 
   /**
-   * Get JIRA issue details by issue key
-   * Implements caching to avoid repeated API calls
+   * Detect whether we are running against Tempo REST API v4 (api.tempo.io)
+   * or the legacy Jira Server/DC plugin endpoints.
+   */
+  private isTempoCloudApi(): boolean {
+    return this.config.baseUrl.includes('api.tempo.io');
+  }
+
+  /**
+   * Get JIRA issue details by issue key.
+   * On Cloud (api.tempo.io), Jira REST endpoints are unavailable so we
+   * return cached data or a placeholder.
    */
   async getIssueById(issueKey: string): Promise<JiraIssue> {
     // Check cache first
     const cached = this.issueCache[issueKey];
-    if (cached && (Date.now() - cached.cached.getTime()) < 300000) { // 5 minute cache
+    if (cached && (Date.now() - cached.cached.getTime()) < 300000) {
       return {
         id: cached.id,
         key: issueKey,
-        fields: {
-          summary: cached.summary
-        }
+        fields: { summary: cached.summary }
       };
     }
 
+    // On Cloud we can't call Jira API with Tempo PAT
+    if (this.isTempoCloudApi()) {
+      return {
+        id: '0',
+        key: issueKey,
+        fields: { summary: issueKey }
+      };
+    }
+
+    // Server/DC: call Jira API directly
     try {
       const response: AxiosResponse<JiraIssue> = await this.axiosInstance.get(
         `/rest/api/latest/issue/${issueKey}`
       );
 
       const issue = response.data;
-      
+
       // Cache the result
       this.issueCache[issueKey] = {
         id: issue.id,
@@ -143,96 +170,109 @@ export class TempoClient {
   }
 
   /**
-   * Get worklogs using Tempo API search endpoint
-   * Automatically filters by the authenticated user
-   * Uses the working /rest/tempo-timesheets/4/worklogs/search endpoint
+   * Get worklogs for the authenticated user.
+   * Routes to Tempo REST API v4 or legacy endpoints based on the configured
+   * base URL.
    */
   async getWorklogs(params: {
-    from?: string; // YYYY-MM-DD
-    to?: string;   // YYYY-MM-DD
+    from?: string;
+    to?: string;
     issueKey?: string;
   }): Promise<TempoWorklogResponse[]> {
-    // Get the current authenticated user
+    if (this.isTempoCloudApi()) {
+      return this.getWorklogsV4(params);
+    }
+    return this.getWorklogsLegacy(params);
+  }
+
+  /**
+   * Worklogs via Tempo REST API v4 (Atlassian Cloud).
+   * Uses GET /4/worklogs/user/{accountId} or GET /4/worklogs/issue/{issueKey}.
+   */
+  private async getWorklogsV4(params: {
+    from?: string;
+    to?: string;
+    issueKey?: string;
+  }): Promise<TempoWorklogResponse[]> {
     const currentUser = await this.getCurrentUser();
-    
-    console.error(`🔍 WORKLOG SEARCH: Processing request for params:`, JSON.stringify(params));
-    console.error(`👤 USER: Using authenticated user ${currentUser}`);
-    
+    console.error(`🔍 WORKLOG SEARCH (v4): Processing request for params:`, JSON.stringify(params));
+
     try {
-      // Since POST search has parameter format issues, let's try a different approach
-      // First, let's try getting worklogs from a specific issue we know exists
+      let allResults: any[] = [];
+
       if (params.issueKey) {
         console.error(`📋 ISSUE-SPECIFIC: Getting worklogs for issue ${params.issueKey}`);
-        
-        const issue = await this.getIssueById(params.issueKey);
-        console.error(`✅ ISSUE RESOLVED: ${issue.key} - ${issue.fields.summary}`);
-        
-        // Get worklogs from JIRA API instead of Tempo search
+        const queryParams = new URLSearchParams();
+        if (params.from) queryParams.append('from', params.from);
+        if (params.to) queryParams.append('to', params.to);
+        queryParams.append('limit', '1000');
+
         const response = await this.axiosInstance.get(
-          `/rest/api/latest/issue/${params.issueKey}/worklog`
+          `/4/worklogs/issue/${params.issueKey}?${queryParams.toString()}`
         );
-        
-        console.error(`📊 JIRA RESPONSE: Found ${response.data?.worklogs?.length || 0} worklogs`);
-        
-        // Convert JIRA worklog format to Tempo format
-        const jiraWorklogs = response.data?.worklogs || [];
-        
+        const results = response.data?.results || [];
         // Filter by current user
-        const filteredWorklogs = jiraWorklogs.filter((worklog: any) => 
-          worklog.author?.name === currentUser || 
-          worklog.author?.accountId === currentUser ||
-          worklog.author?.emailAddress === currentUser
+        allResults = results.filter((w: any) => w.author?.accountId === currentUser);
+      } else {
+        console.error(`📅 DATE-BASED: Getting worklogs for user ${currentUser}`);
+        const queryParams = new URLSearchParams();
+        if (params.from) queryParams.append('from', params.from);
+        if (params.to) queryParams.append('to', params.to);
+        queryParams.append('limit', '1000');
+
+        const response = await this.axiosInstance.get(
+          `/4/worklogs/user/${currentUser}?${queryParams.toString()}`
         );
-        
-        const convertedWorklogs = filteredWorklogs.map((worklog: any) => ({
-          id: worklog.id,
-          timeSpentSeconds: worklog.timeSpentSeconds,
-          billableSeconds: worklog.timeSpentSeconds, // Assume all time is billable for now
-          timeSpent: worklog.timeSpent,
-          issue: {
-            id: issue.id,
-            key: params.issueKey!,
-            summary: issue.fields.summary
-          },
-          started: worklog.started,
-          worker: {
-            displayName: worklog.author?.displayName || 'Unknown',
-            accountId: worklog.author?.accountId || 'unknown'
-          },
-          attributes: {}
-        }));
-        
-        console.error(`🎯 CONVERTED: Returning ${convertedWorklogs.length} worklogs for user ${currentUser}`);
-        return convertedWorklogs;
+        allResults = response.data?.results || [];
       }
-      
-      // For date-based queries without specific issue, we need to use Tempo search
-      console.error(`📅 DATE-BASED: Attempting Tempo search for date range`);
-      
-      const searchParams: any = {
-        from: params.from || '2025-07-01',
-        to: params.to || '2025-07-31'
-      };
 
-      // Add current user as worker for server-side filtering
-      searchParams.worker = [currentUser];
-      console.error(`👤 WORKER FILTER: Adding server-side worker filter for ${currentUser}`);
+      console.error(`📊 TEMPO RESPONSE: Found ${allResults.length} worklogs`);
 
-      console.error(`🔍 TEMPO SEARCH: Sending request with:`, JSON.stringify(searchParams));
+      // Cache issue info from worklogs for later use (e.g. creating worklogs)
+      for (const w of allResults) {
+        if (w.issue?.key) {
+          this.issueCache[w.issue.key] = {
+            id: String(w.issue.id),
+            summary: w.issue?.summary || w.issue.key,
+            cached: new Date()
+          };
+        }
+      }
 
-      const response = await this.axiosInstance.post(
-        `/rest/tempo-timesheets/4/worklogs/search`,
-        searchParams
-      );
-
-      console.error(`📊 TEMPO RESPONSE: Received ${Array.isArray(response.data) ? response.data.length : 'non-array'} results`);
-
-      const results = Array.isArray(response.data) ? response.data : [];
-
-      return results;
-      
+      // Transform v4 response to the format expected by tool handlers
+      return allResults.map((w: any) => ({
+        tempoWorklogId: w.tempoWorklogId,
+        id: String(w.tempoWorklogId),
+        issue: {
+          id: w.issue?.id || 0,
+          key: w.issue?.key || `ISSUE-${w.issue?.id || 'unknown'}`,
+          summary: w.issue?.summary || w.issue?.key || `Issue #${w.issue?.id || 'unknown'}`,
+          internalIssue: false,
+          issueStatus: '',
+          reporterKey: '',
+          estimatedRemainingSeconds: 0,
+          components: [],
+          issueType: '',
+          projectId: 0,
+          projectKey: '',
+          iconUrl: '',
+          versions: []
+        },
+        timeSpentSeconds: w.timeSpentSeconds,
+        billableSeconds: w.billableSeconds || 0,
+        timeSpent: '',
+        started: `${w.startDate}T${w.startTime || '00:00:00'}.000`,
+        comment: w.description || '',
+        worker: w.author?.accountId || currentUser,
+        updater: '',
+        originId: 0,
+        originTaskId: w.issue?.id || 0,
+        dateCreated: '',
+        dateUpdated: '',
+        attributes: {}
+      })) as TempoWorklogResponse[];
     } catch (error) {
-      console.error(`❌ ERROR in getWorklogs:`, error);
+      console.error(`❌ ERROR in getWorklogsV4:`, error);
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
         const url = error.config?.url;
@@ -245,42 +285,157 @@ export class TempoClient {
   }
 
   /**
-   * Get work schedule using Tempo Core API v2 schedule search endpoint
-   * Automatically filters by the authenticated user
-   * Uses the /rest/tempo-core/2/user/schedule/search endpoint
+   * Worklogs via legacy Jira Server/DC endpoints.
    */
-  async getSchedule(params: GetScheduleParams): Promise<TempoScheduleResponse[]> {
-    // Get the current authenticated user
+  private async getWorklogsLegacy(params: {
+    from?: string;
+    to?: string;
+    issueKey?: string;
+  }): Promise<TempoWorklogResponse[]> {
     const currentUser = await this.getCurrentUser();
 
-    console.error(`📅 SCHEDULE SEARCH: Processing request for params:`, JSON.stringify(params));
+    console.error(`🔍 WORKLOG SEARCH (legacy): Processing request for params:`, JSON.stringify(params));
     console.error(`👤 USER: Using authenticated user ${currentUser}`);
+
+    try {
+      if (params.issueKey) {
+        console.error(`📋 ISSUE-SPECIFIC: Getting worklogs for issue ${params.issueKey}`);
+
+        const issue = await this.getIssueById(params.issueKey);
+        console.error(`✅ ISSUE RESOLVED: ${issue.key} - ${issue.fields.summary}`);
+
+        const response = await this.axiosInstance.get(
+          `/rest/api/latest/issue/${params.issueKey}/worklog`
+        );
+
+        const jiraWorklogs = response.data?.worklogs || [];
+
+        const filteredWorklogs = jiraWorklogs.filter((worklog: any) =>
+          worklog.author?.name === currentUser ||
+          worklog.author?.accountId === currentUser ||
+          worklog.author?.emailAddress === currentUser
+        );
+
+        return filteredWorklogs.map((worklog: any) => ({
+          id: worklog.id,
+          timeSpentSeconds: worklog.timeSpentSeconds,
+          billableSeconds: worklog.timeSpentSeconds,
+          timeSpent: worklog.timeSpent,
+          issue: {
+            id: issue.id as any,
+            key: params.issueKey!,
+            summary: issue.fields.summary,
+            internalIssue: false,
+            issueStatus: '',
+            reporterKey: '',
+            estimatedRemainingSeconds: 0,
+            components: [],
+            issueType: '',
+            projectId: 0,
+            projectKey: '',
+            iconUrl: '',
+            versions: []
+          },
+          started: worklog.started,
+          worker: worklog.author?.name || currentUser,
+          updater: '',
+          originId: 0,
+          originTaskId: 0,
+          dateCreated: '',
+          dateUpdated: '',
+          attributes: {}
+        })) as TempoWorklogResponse[];
+      }
+
+      console.error(`📅 DATE-BASED: Attempting Tempo search for date range`);
+
+      const searchParams: any = {
+        from: params.from || '2025-07-01',
+        to: params.to || '2025-07-31'
+      };
+
+      searchParams.worker = [currentUser];
+
+      const response = await this.axiosInstance.post(
+        `/rest/tempo-timesheets/4/worklogs/search`,
+        searchParams
+      );
+
+      const results = Array.isArray(response.data) ? response.data : [];
+      return results;
+
+    } catch (error) {
+      console.error(`❌ ERROR in getWorklogsLegacy:`, error);
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const url = error.config?.url;
+        const method = error.config?.method?.toUpperCase();
+        const responseData = error.response?.data;
+        throw new Error(`Failed to retrieve worklogs: ${method} ${url} returned ${status}. ${responseData?.message || JSON.stringify(responseData)}`);
+      }
+      throw new Error(`Failed to retrieve worklogs: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Get work schedule for the authenticated user.
+   * Routes to Tempo REST API v4 or legacy endpoints based on the configured
+   * base URL.
+   */
+  async getSchedule(params: GetScheduleParams): Promise<TempoScheduleResponse[]> {
+    if (this.isTempoCloudApi()) {
+      return this.getScheduleV4(params);
+    }
+    return this.getScheduleLegacy(params);
+  }
+
+  /**
+   * Schedule via Tempo REST API v4 (Atlassian Cloud).
+   * Uses GET /4/user-schedule/{accountId}.
+   */
+  private async getScheduleV4(params: GetScheduleParams): Promise<TempoScheduleResponse[]> {
+    const currentUser = await this.getCurrentUser();
+    console.error(`📅 SCHEDULE SEARCH (v4): Processing request for params:`, JSON.stringify(params));
 
     try {
       const { startDate, endDate } = params;
       const actualEndDate = endDate || startDate;
 
-      const searchParams = {
-        from: startDate,
-        to: actualEndDate,
-        userKeys: [currentUser]
-      };
+      const queryParams = new URLSearchParams();
+      queryParams.append('from', startDate);
+      queryParams.append('to', actualEndDate);
 
-      console.error(`🔍 TEMPO SCHEDULE SEARCH: Sending request with:`, JSON.stringify(searchParams));
-
-      const response = await this.axiosInstance.post(
-        `/rest/tempo-core/2/user/schedule/search`,
-        searchParams
+      const response = await this.axiosInstance.get(
+        `/4/user-schedule/${currentUser}?${queryParams.toString()}`
       );
 
-      console.error(`📊 TEMPO SCHEDULE RESPONSE: Received ${Array.isArray(response.data) ? response.data.length : 'non-array'} results`);
+      const results = response.data?.results || [];
+      console.error(`📊 TEMPO SCHEDULE RESPONSE: Received ${results.length} days`);
 
-      const results = Array.isArray(response.data) ? response.data : [];
+      const totalRequiredSeconds = results.reduce(
+        (sum: number, day: any) => sum + (day.requiredSeconds || 0), 0
+      );
 
-      return results;
-
+      // Transform v4 format to the shape expected by tool handlers:
+      // [{ schedule: { days: [...], requiredSeconds }, user: { ... } }]
+      return [{
+        schedule: {
+          numberOfWorkingDays: results.filter((d: any) => d.type === 'WORKING_DAY').length,
+          requiredSeconds: totalRequiredSeconds,
+          days: results.map((day: any) => ({
+            date: day.date,
+            requiredSeconds: day.requiredSeconds || 0,
+            type: day.type || 'NON_WORKING_DAY'
+          }))
+        },
+        user: {
+          username: currentUser,
+          displayName: '',
+          key: currentUser
+        }
+      }];
     } catch (error) {
-      console.error(`❌ ERROR in getSchedule:`, error);
+      console.error(`❌ ERROR in getScheduleV4:`, error);
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
         const url = error.config?.url;
@@ -293,19 +448,64 @@ export class TempoClient {
   }
 
   /**
-   * Test basic connectivity to JIRA
+   * Schedule via legacy Jira Server/DC endpoints.
+   * Uses POST /rest/tempo-core/2/user/schedule/search.
+   */
+  private async getScheduleLegacy(params: GetScheduleParams): Promise<TempoScheduleResponse[]> {
+    const currentUser = await this.getCurrentUser();
+
+    console.error(`📅 SCHEDULE SEARCH (legacy): Processing request for params:`, JSON.stringify(params));
+
+    try {
+      const { startDate, endDate } = params;
+      const actualEndDate = endDate || startDate;
+
+      const searchParams = {
+        from: startDate,
+        to: actualEndDate,
+        userKeys: [currentUser]
+      };
+
+      const response = await this.axiosInstance.post(
+        `/rest/tempo-core/2/user/schedule/search`,
+        searchParams
+      );
+
+      const results = Array.isArray(response.data) ? response.data : [];
+      return results;
+
+    } catch (error) {
+      console.error(`❌ ERROR in getScheduleLegacy:`, error);
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const url = error.config?.url;
+        const method = error.config?.method?.toUpperCase();
+        const responseData = error.response?.data;
+        throw new Error(`Failed to retrieve schedule: ${method} ${url} returned ${status}. ${responseData?.message || JSON.stringify(responseData)}`);
+      }
+      throw new Error(`Failed to retrieve schedule: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Test basic connectivity
    */
   private async testConnection(): Promise<void> {
     try {
-      const response = await this.axiosInstance.get('/rest/api/2/myself');
-      console.error(`Connection test successful. Authenticated as: ${response.data.displayName || response.data.name}`);
+      if (this.isTempoCloudApi()) {
+        const currentUser = await this.getCurrentUser();
+        await this.axiosInstance.get(`/4/worklogs/user/${currentUser}?limit=1`);
+        console.error(`Connection test successful for user: ${currentUser}`);
+      } else {
+        const response = await this.axiosInstance.get('/rest/api/2/myself');
+        console.error(`Connection test successful. Authenticated as: ${response.data.displayName || response.data.name}`);
+      }
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const debugInfo = `
         URL: ${error.config?.baseURL}${error.config?.url}
         Status: ${error.response?.status}
         Method: ${error.config?.method}
-        Headers: ${JSON.stringify(error.config?.headers)}
         Response: ${JSON.stringify(error.response?.data)}
         `;
         throw new Error(`Authentication test failed: ${error.response?.status} ${error.response?.statusText}. Debug info: ${debugInfo}`);
@@ -318,76 +518,77 @@ export class TempoClient {
    * Get worklogs for a specific issue using JIRA API
    */
   private async getWorklogsForIssue(
-    issueKey: string, 
-    from?: string, 
-    to?: string, 
+    issueKey: string,
+    from?: string,
+    to?: string,
     worker?: string
   ): Promise<TempoWorklogResponse[]> {
-    try {
-      // Get all worklogs for the issue using JIRA API
-      const response = await this.axiosInstance.get(
-        `/rest/api/latest/issue/${issueKey}/worklog`
-      );
-
-      const jiraWorklogs = response.data.worklogs || [];
-      
-      // Convert JIRA worklogs to Tempo format and apply filters
-      const tempoWorklogs: TempoWorklogResponse[] = jiraWorklogs
-        .filter((worklog: any) => {
-          // Filter by date if specified
-          if (from || to) {
-            const worklogDate = worklog.started ? worklog.started.split('T')[0] : null;
-            if (from && worklogDate && worklogDate < from) return false;
-            if (to && worklogDate && worklogDate > to) return false;
-          }
-          
-          // Filter by worker if specified  
-          if (worker && worklog.author?.name !== worker) return false;
-          
-          return true;
-        })
-        .map((worklog: any) => ({
-          id: worklog.id,
-          billableSeconds: worklog.timeSpentSeconds, // Assume all time is billable for now
-          timeSpentSeconds: worklog.timeSpentSeconds,
-          timeSpent: worklog.timeSpent,
-          issue: {
-            id: worklog.issueId || 'unknown',
-            key: issueKey,
-            summary: 'Issue summary not available from worklog API'
-          },
-          started: worklog.started,
-          worker: {
-            accountId: worklog.author?.accountId || 'unknown',
-            displayName: worklog.author?.displayName || worklog.author?.name || 'Unknown'
-          },
-          attributes: {
-            description: worklog.comment || ''
-          }
-        }));
-
-      return tempoWorklogs;
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        throw new Error(`Issue ${issueKey} not found or you don't have permission to view its worklogs.`);
-      }
-      throw error;
-    }
+    return this.getWorklogs({ from, to, issueKey });
   }
 
   /**
-   * Create a new worklog entry
-   * Follows the pattern from the C# implementation
-   * Note: API returns an array with a single worklog object
+   * Create a new worklog entry.
+   * Routes to v4 or legacy endpoint based on base URL.
    */
-  async createWorklog(payload: TempoWorklogCreatePayload): Promise<TempoWorklogResponse> {
+  async createWorklog(payload: TempoWorklogCreatePayload | TempoV4WorklogCreatePayload): Promise<TempoWorklogResponse> {
+    if (this.isTempoCloudApi()) {
+      return this.createWorklogV4(payload as TempoV4WorklogCreatePayload);
+    }
+    return this.createWorklogLegacy(payload as TempoWorklogCreatePayload);
+  }
+
+  private async createWorklogV4(payload: TempoV4WorklogCreatePayload): Promise<TempoWorklogResponse> {
+    try {
+      const response = await this.axiosInstance.post('/4/worklogs', payload);
+      const worklog = response.data;
+
+      return {
+        tempoWorklogId: worklog.tempoWorklogId,
+        id: String(worklog.tempoWorklogId),
+        issue: {
+          id: worklog.issue?.id || 0,
+          key: worklog.issue?.key || 'unknown',
+          summary: worklog.issue?.summary || worklog.issue?.key || 'unknown',
+          internalIssue: false,
+          issueStatus: '',
+          reporterKey: '',
+          estimatedRemainingSeconds: 0,
+          components: [],
+          issueType: '',
+          projectId: 0,
+          projectKey: '',
+          iconUrl: '',
+          versions: []
+        },
+        timeSpentSeconds: worklog.timeSpentSeconds,
+        billableSeconds: worklog.billableSeconds || 0,
+        timeSpent: '',
+        started: `${worklog.startDate}T${worklog.startTime || '00:00:00'}.000`,
+        comment: worklog.description || '',
+        worker: worklog.author?.accountId || '',
+        updater: '',
+        originId: 0,
+        originTaskId: worklog.issue?.id || 0,
+        dateCreated: '',
+        dateUpdated: '',
+        attributes: {}
+      } as TempoWorklogResponse;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.data) {
+        const apiError: TempoApiError = error.response.data;
+        throw new Error(`Failed to create worklog: ${apiError.message || JSON.stringify(error.response.data) || error.message}`);
+      }
+      throw new Error(`Failed to create worklog: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async createWorklogLegacy(payload: TempoWorklogCreatePayload): Promise<TempoWorklogResponse> {
     try {
       const response: AxiosResponse<TempoWorklogResponse[]> = await this.axiosInstance.post(
         '/rest/tempo-timesheets/4/worklogs/',
         payload
       );
 
-      // API returns an array with a single worklog object
       const worklogs = response.data;
       if (!Array.isArray(worklogs) || worklogs.length === 0) {
         throw new Error('Unexpected response format from Tempo API');
@@ -404,11 +605,16 @@ export class TempoClient {
   }
 
   /**
-   * Delete a worklog entry
+   * Delete a worklog entry.
+   * Routes to v4 or legacy endpoint based on base URL.
    */
   async deleteWorklog(worklogId: string): Promise<void> {
+    const path = this.isTempoCloudApi()
+      ? `/4/worklogs/${worklogId}`
+      : `/rest/tempo-timesheets/4/worklogs/${worklogId}`;
+
     try {
-      await this.axiosInstance.delete(`/rest/tempo-timesheets/4/worklogs/${worklogId}`);
+      await this.axiosInstance.delete(path);
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 404) {
         throw new Error(`Worklog ${worklogId} not found.`);
@@ -428,41 +634,54 @@ export class TempoClient {
    * Helper method to convert seconds to hours
    */
   secondsToHours(seconds: number): number {
-    return Math.round((seconds / 3600) * 100) / 100; // Round to 2 decimal places
+    return Math.round((seconds / 3600) * 100) / 100;
   }
 
   /**
-   * Create worklog payload from simplified parameters
-   * Implements the same pattern as the C# PostTime method
-   * Automatically uses the authenticated user as the worker
+   * Create worklog payload from simplified parameters.
+   * Returns a v4 or legacy payload depending on the configured base URL.
    */
   async createWorklogPayload(params: {
     issueKey: string;
     hours: number;
-    startDate: string; // YYYY-MM-DD
-    endDate?: string;  // YYYY-MM-DD
+    startDate: string;
+    endDate?: string;
     billable?: boolean;
     description?: string;
-  }): Promise<TempoWorklogCreatePayload> {
-    // Resolve issue key to numerical ID
-    const issue = await this.getIssueById(params.issueKey);
-    
-    // Get the current authenticated user
+  }): Promise<TempoWorklogCreatePayload | TempoV4WorklogCreatePayload> {
     const currentUser = await this.getCurrentUser();
-    
     const timeInSeconds = this.hoursToSeconds(params.hours);
+
+    if (this.isTempoCloudApi()) {
+      // Try to get numerical issue ID from cache
+      const cached = this.issueCache[params.issueKey];
+      if (!cached?.id || cached.id === '0') {
+        console.error(`⚠️ Issue ${params.issueKey} not in cache. Fetch worklogs first to populate the cache, or the create call may fail.`);
+      }
+
+      const payload: TempoV4WorklogCreatePayload = {
+        authorAccountId: currentUser,
+        issueId: cached?.id ? Number(cached.id) : 0,
+        timeSpentSeconds: timeInSeconds,
+        billableSeconds: params.billable !== false ? timeInSeconds : 0,
+        startDate: params.startDate,
+        startTime: "09:00:00",
+        description: params.description || undefined
+      };
+      return payload;
+    }
+
+    // Legacy Server/DC payload
+    const issue = await this.getIssueById(params.issueKey);
     const startDate = params.startDate;
     const endDate = params.endDate || params.startDate;
-    
-    // Build attributes object - keep it empty to match working payload
     const attributes: Record<string, any> = {};
 
-    // Build the payload using the authenticated user as worker
     const payload: TempoWorklogCreatePayload = {
       attributes,
       billableSeconds: params.billable !== false ? timeInSeconds : 0,
       timeSpentSeconds: timeInSeconds,
-      worker: currentUser, // Always use the authenticated user
+      worker: currentUser,
       started: `${startDate}T00:00:00.000`,
       originTaskId: issue.id,
       remainingEstimate: null,
@@ -475,8 +694,7 @@ export class TempoClient {
 
   /**
    * Batch create multiple worklogs
-   * Automatically uses the authenticated user as the worker
-   * Uses Promise.all() for concurrent processing like the C# Task.WhenAll pattern
+   * Uses Promise.all() for concurrent processing
    */
   async createWorklogsBatch(worklogParams: Array<{
     issueKey: string;
@@ -491,7 +709,6 @@ export class TempoClient {
     error?: string;
     originalParams: typeof worklogParams[0];
   }>> {
-    // Create all payloads first (this will cache issue resolutions)
     const payloadPromises = worklogParams.map(async (params) => ({
       params,
       payload: await this.createWorklogPayload(params)
@@ -499,7 +716,6 @@ export class TempoClient {
 
     const payloadResults = await Promise.all(payloadPromises);
 
-    // Now create all worklogs concurrently
     const createPromises = payloadResults.map(async ({ params, payload }) => {
       try {
         const worklog = await this.createWorklog(payload);
