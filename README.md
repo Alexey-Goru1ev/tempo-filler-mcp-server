@@ -1,24 +1,26 @@
 # Tempo Filler MCP Server (Atlassian Cloud Fork)
 
-Fork of [TRANZACT/tempo-filler-mcp-server](https://github.com/TRANZACT/tempo-filler-mcp-server) with **Atlassian Cloud support via Tempo REST API v4**.
+Fork of [TRANZACT/tempo-filler-mcp-server](https://github.com/TRANZACT/tempo-filler-mcp-server) with full **Atlassian Cloud support** for [Tempo Timesheets](https://marketplace.atlassian.com/apps/6572/tempo-timesheets) — a time-tracking Jira application.
 
-The upstream version only supports Jira Server/Data Center deployments. This fork adds automatic detection and routing for **Atlassian Cloud** instances where Tempo lives at `api.tempo.io`.
+The upstream version only supports Jira Server/Data Center deployments. This fork adds automatic detection and routing for **Atlassian Cloud** instances where Tempo operates as a Jira Cloud app with its own REST API at `api.tempo.io`, separate from the Jira REST API.
 
-## What's Fixed
+## Why This Fork Exists
 
-The upstream server fails with `Authentication failed` on Atlassian Cloud because:
+Tempo Timesheets on Atlassian Cloud is a **Jira Cloud application** with its own separate REST API (`api.tempo.io`). This creates several incompatibilities that the upstream server doesn't handle:
 
-1. **Wrong API endpoints** — Cloud uses Tempo REST API v4 (`/4/worklogs`, `/4/user-schedule`), not the legacy Server/DC paths (`/rest/tempo-timesheets/4/worklogs/search`, `/rest/tempo-core/2/user/schedule/search`).
-2. **No Cloud user resolution** — Cloud can't call Jira's `/rest/api/latest/myself` with a Tempo PAT. This fork introduces `TEMPO_ACCOUNT_ID` for direct account identification.
-3. **Different payload formats** — Cloud worklog creation requires `issueId` (numeric) and `authorAccountId`, not the legacy `originTaskId` and `worker` fields.
+1. **Separate API surface** — Cloud uses Tempo REST API v4 (`/4/worklogs`, `/4/user-schedule`), not the legacy Server/DC Jira paths (`/rest/tempo-timesheets/4/`, `/rest/tempo-core/2/`).
+2. **Separate authentication** — Tempo Cloud PATs can't call Jira REST APIs, and vice versa. This fork introduces `TEMPO_ACCOUNT_ID` for direct user identification.
+3. **Numeric issue IDs required** — Cloud `POST /4/worklogs` requires a numeric `issueId`, not a Jira issue key like `PROJ-1234`. This fork adds **Jira Cloud REST API integration** to resolve issue keys automatically.
+4. **Different payload formats** — Cloud requires `issueId` (numeric) + `authorAccountId`, not the legacy `originTaskId` + `worker` fields.
 
 ### Changes from Upstream
 
 | File | What Changed |
 |------|-------------|
-| `src/tempo-client.ts` | Added `isTempoCloudApi()` detection, dual API routing for all operations (read/write), `TEMPO_ACCOUNT_ID` support, issue ID caching from worklog responses |
-| `src/types/mcp.ts` | Added `TEMPO_ACCOUNT_ID` to environment variable constants |
-| `src/types/tempo.ts` | Added `TempoV4WorklogCreatePayload` interface for Cloud payloads |
+| `src/tempo-client.ts` | Cloud API routing, `TEMPO_ACCOUNT_ID` support, Jira Cloud REST API client for issue key → numeric ID resolution, dual-format issue cache |
+| `src/index.ts` | Reads and passes Jira Cloud API credentials (`JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`) |
+| `src/types/mcp.ts` | Added `TEMPO_ACCOUNT_ID` and Jira API env var constants |
+| `src/types/tempo.ts` | Added `TempoV4WorklogCreatePayload` interface, optional Jira config fields on `TempoClientConfig` |
 
 **Backward compatibility**: Fully preserved. Existing Server/DC setups continue to work unchanged — routing is automatic based on `TEMPO_BASE_URL`.
 
@@ -38,14 +40,18 @@ Tool Handler (get_worklogs, post_worklog, etc.)
     v
 TempoClient
     |
-    +-- isTempoCloudApi()? --+
-    |                        |
-    v                        v
-  Cloud (api.tempo.io)    Server/DC (jira.example.com)
-  GET /4/worklogs/...     POST /rest/tempo-timesheets/4/...
-  GET /4/user-schedule/   POST /rest/tempo-core/2/...
-  POST /4/worklogs        POST /rest/tempo-timesheets/4/worklogs/
-  DELETE /4/worklogs/{id} DELETE /rest/tempo-timesheets/4/worklogs/{id}
+    +-- isTempoCloudApi()? ------+
+    |                            |
+    v                            v
+  Cloud (api.tempo.io)        Server/DC (jira.example.com)
+  GET /4/worklogs/...         POST /rest/tempo-timesheets/4/...
+  GET /4/user-schedule/       POST /rest/tempo-core/2/...
+  POST /4/worklogs            POST /rest/tempo-timesheets/4/worklogs/
+  DELETE /4/worklogs/{id}     DELETE /rest/tempo-timesheets/4/worklogs/{id}
+    |
+    v (issue key resolution)
+  Jira Cloud REST API (your-site.atlassian.net)
+  GET /rest/api/3/issue/{key} → numeric issueId
 ```
 
 ### API Routing
@@ -66,12 +72,17 @@ The server detects the deployment type from `TEMPO_BASE_URL`:
 2. Caches the result for all subsequent API calls
 3. Authenticates with `Authorization: Bearer {TEMPO_PAT}` against Jira instance
 
-### Issue Caching
+### Issue Key Resolution (Cloud)
 
-On Cloud, the server can't call Jira's issue API with a Tempo PAT. Instead, it:
-- Caches issue IDs from worklog responses (`getWorklogs` populates the cache)
-- Uses cached `issueId` when creating worklogs (Cloud v4 requires numeric issue ID)
-- Cache has 5-minute TTL
+Tempo Cloud's `POST /4/worklogs` requires a numeric `issueId` — it does not accept Jira issue keys like `DVPSS-3513`. Since Tempo PATs can't call the Jira REST API, a separate Jira API integration is needed.
+
+When `JIRA_BASE_URL`, `JIRA_EMAIL`, and `JIRA_API_TOKEN` are configured:
+1. `getIssueById()` calls Jira Cloud REST API (`GET /rest/api/3/issue/{key}?fields=summary`)
+2. Resolves issue key → numeric ID (e.g., `DVPSS-3513` → `116120`)
+3. Caches the result under both `DVPSS-3513` and `ISSUE-116120` keys (5-minute TTL)
+4. `createWorklogPayload()` uses the resolved numeric ID for `POST /4/worklogs`
+
+Without Jira API credentials, worklog creation will fail with a clear error message explaining the required configuration.
 
 ## Installation
 
@@ -101,7 +112,10 @@ Then configure your MCP client to run the built server:
       "env": {
         "TEMPO_BASE_URL": "https://api.tempo.io",
         "TEMPO_PAT": "your-tempo-personal-access-token",
-        "TEMPO_ACCOUNT_ID": "your-jira-account-id"
+        "TEMPO_ACCOUNT_ID": "your-jira-account-id",
+        "JIRA_BASE_URL": "https://your-site.atlassian.net",
+        "JIRA_EMAIL": "you@company.com",
+        "JIRA_API_TOKEN": "your-jira-api-token"
       }
     }
   }
@@ -122,7 +136,10 @@ Add to your project's MCP servers via `claude mcp add` or edit `.claude/external
       "env": {
         "TEMPO_BASE_URL": "https://api.tempo.io",
         "TEMPO_PAT": "your-tempo-pat",
-        "TEMPO_ACCOUNT_ID": "your-jira-account-id"
+        "TEMPO_ACCOUNT_ID": "your-jira-account-id",
+        "JIRA_BASE_URL": "https://your-site.atlassian.net",
+        "JIRA_EMAIL": "you@company.com",
+        "JIRA_API_TOKEN": "your-jira-api-token"
       }
     }
   }
@@ -147,6 +164,11 @@ npx @tranzact/tempo-filler-mcp-server
 | `TEMPO_PAT` | Yes | Tempo Personal Access Token |
 | `TEMPO_ACCOUNT_ID` | Cloud only | Your Jira account ID (required for Cloud, ignored on Server/DC) |
 | `TEMPO_DEFAULT_HOURS` | No | Default hours per workday (default: 8) |
+| `JIRA_BASE_URL` | Cloud only | Jira Cloud site URL (e.g., `https://your-site.atlassian.net`) — needed for issue key resolution |
+| `JIRA_EMAIL` | Cloud only | Jira Cloud user email — used with `JIRA_API_TOKEN` for basic auth |
+| `JIRA_API_TOKEN` | Cloud only | Jira Cloud API token — generate at [Atlassian API Tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
+
+> **Note**: Without `JIRA_*` credentials on Cloud, `get_worklogs` and `get_schedule` work fine (they only use the Tempo API), but `post_worklog` and `bulk_post_worklogs` will fail because the Tempo v4 API requires a numeric `issueId` that can only be resolved via the Jira REST API.
 
 ### Getting Your Tempo PAT
 
