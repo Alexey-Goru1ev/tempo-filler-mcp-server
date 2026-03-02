@@ -174,6 +174,9 @@ export interface TempoClientConfig {
   personalAccessToken: string; // PAT for authentication
   defaultHours?: number;  // Default hours per workday (8)
   timeout?: number;       // Request timeout in milliseconds
+  jiraBaseUrl?: string;   // Jira Cloud base URL (e.g., https://mysite.atlassian.net)
+  jiraEmail?: string;     // Jira Cloud user email for basic auth
+  jiraApiToken?: string;  // Jira Cloud API token for basic auth
 }
 
 // Issue cache entry for performance optimization

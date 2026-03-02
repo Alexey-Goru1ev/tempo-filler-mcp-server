@@ -13,6 +13,7 @@ import {
 
 export class TempoClient {
   private axiosInstance: AxiosInstance;
+  private jiraAxiosInstance: AxiosInstance | null = null;
   private issueCache: IssueCache = {};
   private config: TempoClientConfig;
   private currentUser: string | null = null; // Cache for the authenticated user
@@ -31,6 +32,25 @@ export class TempoClient {
         'User-Agent': 'TempoFiller-MCP/1.0.0'
       }
     });
+
+    // Create Jira Cloud axios instance for issue key resolution (optional)
+    if (config.jiraBaseUrl && config.jiraEmail && config.jiraApiToken) {
+      const jiraAuth = Buffer.from(`${config.jiraEmail}:${config.jiraApiToken}`).toString('base64');
+      this.jiraAxiosInstance = axios.create({
+        baseURL: config.jiraBaseUrl,
+        timeout: config.timeout || 30000,
+        headers: {
+          'Authorization': `Basic ${jiraAuth}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'TempoFiller-MCP/1.0.0'
+        }
+      });
+      console.error('✓ Jira Cloud API configured for issue key resolution');
+    } else if (this.isTempoCloudApiStatic(config.baseUrl)) {
+      console.error('⚠️ Jira Cloud API credentials not configured. Issue key resolution may fail.');
+      console.error('  Set JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN for full functionality.');
+    }
 
     // Add request interceptor for debugging
     this.axiosInstance.interceptors.request.use(
@@ -121,9 +141,23 @@ export class TempoClient {
   }
 
   /**
+   * Static version of isTempoCloudApi for use in the constructor
+   * before 'this' is fully initialized.
+   */
+  private static isTempoCloudApiStatic(baseUrl: string): boolean {
+    return baseUrl.includes('api.tempo.io');
+  }
+
+  // Instance-level alias for the static method (used in constructor)
+  private isTempoCloudApiStatic(baseUrl: string): boolean {
+    return TempoClient.isTempoCloudApiStatic(baseUrl);
+  }
+
+  /**
    * Get JIRA issue details by issue key.
-   * On Cloud (api.tempo.io), Jira REST endpoints are unavailable so we
-   * return cached data or a placeholder.
+   * On Cloud (api.tempo.io), uses the Jira Cloud REST API (if configured)
+   * to resolve issue keys to numeric IDs.
+   * Falls back to cached data or a placeholder if Jira API is unavailable.
    */
   async getIssueById(issueKey: string): Promise<JiraIssue> {
     // Check cache first
@@ -136,8 +170,51 @@ export class TempoClient {
       };
     }
 
-    // On Cloud we can't call Jira API with Tempo PAT
+    // On Cloud: use Jira REST API if configured, otherwise return placeholder
     if (this.isTempoCloudApi()) {
+      if (this.jiraAxiosInstance) {
+        try {
+          console.error(`🔍 Resolving issue key ${issueKey} via Jira Cloud REST API`);
+          const response = await this.jiraAxiosInstance.get(
+            `/rest/api/3/issue/${issueKey}?fields=summary`
+          );
+
+          const issue = response.data;
+          const issueId = String(issue.id);
+          const summary = issue.fields?.summary || issueKey;
+
+          // Cache the result under both the issue key and ISSUE-{id} format
+          this.issueCache[issueKey] = {
+            id: issueId,
+            summary,
+            cached: new Date()
+          };
+          this.issueCache[`ISSUE-${issueId}`] = {
+            id: issueId,
+            summary,
+            cached: new Date()
+          };
+
+          console.error(`✅ Resolved ${issueKey} → ID ${issueId} ("${summary}")`);
+
+          return {
+            id: issueId,
+            key: issueKey,
+            fields: { summary }
+          };
+        } catch (error) {
+          if (axios.isAxiosError(error) && error.response?.status === 404) {
+            throw new Error(`Issue ${issueKey} not found in Jira. Please check the issue key.`);
+          }
+          if (axios.isAxiosError(error) && error.response?.status === 401) {
+            console.error(`⚠️ Jira API authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN.`);
+          }
+          throw new Error(`Failed to resolve issue ${issueKey} via Jira API: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      // No Jira API configured — return placeholder
+      console.error(`⚠️ Cannot resolve issue ${issueKey}: Jira Cloud API not configured.`);
       return {
         id: '0',
         key: issueKey,
@@ -145,7 +222,7 @@ export class TempoClient {
       };
     }
 
-    // Server/DC: call Jira API directly
+    // Server/DC: call Jira API directly via Tempo instance
     try {
       const response: AxiosResponse<JiraIssue> = await this.axiosInstance.get(
         `/rest/api/latest/issue/${issueKey}`
@@ -653,15 +730,20 @@ export class TempoClient {
     const timeInSeconds = this.hoursToSeconds(params.hours);
 
     if (this.isTempoCloudApi()) {
-      // Try to get numerical issue ID from cache
-      const cached = this.issueCache[params.issueKey];
-      if (!cached?.id || cached.id === '0') {
-        console.error(`⚠️ Issue ${params.issueKey} not in cache. Fetch worklogs first to populate the cache, or the create call may fail.`);
+      // Resolve issue key to numeric ID via cache or Jira API
+      const issue = await this.getIssueById(params.issueKey);
+      const issueId = Number(issue.id);
+
+      if (!issueId || issueId === 0) {
+        throw new Error(
+          `Cannot resolve issue key '${params.issueKey}' to a numeric ID. ` +
+          `Configure JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN to enable issue key resolution on Tempo Cloud.`
+        );
       }
 
       const payload: TempoV4WorklogCreatePayload = {
         authorAccountId: currentUser,
-        issueId: cached?.id ? Number(cached.id) : 0,
+        issueId,
         timeSpentSeconds: timeInSeconds,
         billableSeconds: params.billable !== false ? timeInSeconds : 0,
         startDate: params.startDate,

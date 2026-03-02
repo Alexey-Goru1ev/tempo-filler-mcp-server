@@ -51,12 +51,18 @@ const config = {
   baseUrl: process.env[ENV_VARS.TEMPO_BASE_URL] || '',
   personalAccessToken: process.env[ENV_VARS.TEMPO_PAT] || '',
   defaultHours: parseInt(process.env[ENV_VARS.TEMPO_DEFAULT_HOURS] || String(DEFAULTS.HOURS_PER_DAY)),
+  jiraBaseUrl: process.env[ENV_VARS.JIRA_BASE_URL] || '',
+  jiraEmail: process.env[ENV_VARS.JIRA_EMAIL] || '',
+  jiraApiToken: process.env[ENV_VARS.JIRA_API_TOKEN] || '',
 };
 
 // Debug logging
 console.error(`Debug: ${ENV_VARS.TEMPO_BASE_URL} = ${config.baseUrl ? '[CONFIGURED]' : '[MISSING]'}`);
 console.error(`Debug: ${ENV_VARS.TEMPO_PAT} = ${config.personalAccessToken ? '[CONFIGURED - length: ' + config.personalAccessToken.length + ']' : '[MISSING]'}`);
 console.error(`Debug: ${ENV_VARS.TEMPO_DEFAULT_HOURS} = ${config.defaultHours}`);
+console.error(`Debug: ${ENV_VARS.JIRA_BASE_URL} = ${config.jiraBaseUrl ? '[CONFIGURED]' : '[NOT SET]'}`);
+console.error(`Debug: ${ENV_VARS.JIRA_EMAIL} = ${config.jiraEmail ? '[CONFIGURED]' : '[NOT SET]'}`);
+console.error(`Debug: ${ENV_VARS.JIRA_API_TOKEN} = ${config.jiraApiToken ? '[CONFIGURED]' : '[NOT SET]'}`);
 
 // Validate required configuration
 if (!config.baseUrl) {
