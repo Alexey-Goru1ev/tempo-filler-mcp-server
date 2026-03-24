@@ -170,6 +170,21 @@ export class TempoClient {
       };
     }
 
+    // Handle synthetic ISSUE-{numericId} keys from Tempo v4 worklogs
+    // Tempo Cloud returns numeric issue IDs without Jira keys, so we
+    // synthesize "ISSUE-77328" in getWorklogsV4. If that key reaches here,
+    // extract the numeric ID directly — no Jira API call needed.
+    const syntheticMatch = issueKey.match(/^ISSUE-(\d+)$/);
+    if (syntheticMatch) {
+      const numericId = syntheticMatch[1];
+      console.error(`⚡ Extracted numeric ID ${numericId} from synthetic key ${issueKey}`);
+      return {
+        id: numericId,
+        key: issueKey,
+        fields: { summary: `Issue #${numericId}` }
+      };
+    }
+
     // On Cloud: use Jira REST API if configured, otherwise return placeholder
     if (this.isTempoCloudApi()) {
       if (this.jiraAxiosInstance) {
@@ -313,6 +328,50 @@ export class TempoClient {
             summary: w.issue?.summary || w.issue.key,
             cached: new Date()
           };
+        }
+      }
+
+      // Resolve real Jira keys for issues that only have numeric IDs
+      if (this.jiraAxiosInstance) {
+        const unresolvedIds = new Map<string, string[]>();
+        for (let i = 0; i < allResults.length; i++) {
+          const w = allResults[i];
+          if (!w.issue?.key && w.issue?.id) {
+            const id = String(w.issue.id);
+            if (!unresolvedIds.has(id)) unresolvedIds.set(id, []);
+            unresolvedIds.get(id)!.push(String(i));
+          }
+        }
+
+        if (unresolvedIds.size > 0) {
+          console.error(`🔍 Resolving ${unresolvedIds.size} issue(s) with numeric IDs only`);
+          const resolutions = await Promise.allSettled(
+            Array.from(unresolvedIds.entries()).map(async ([numericId]) => {
+              const resp = await this.jiraAxiosInstance!.get(
+                `/rest/api/3/issue/${numericId}?fields=summary`
+              );
+              return { numericId, key: resp.data.key as string, summary: resp.data.fields?.summary as string };
+            })
+          );
+
+          for (const result of resolutions) {
+            if (result.status === 'fulfilled') {
+              const { numericId, key, summary } = result.value;
+              // Patch worklog results with real keys
+              for (const w of allResults) {
+                if (String(w.issue?.id) === numericId && !w.issue?.key) {
+                  w.issue.key = key;
+                  if (summary) w.issue.summary = summary;
+                }
+              }
+              // Cache under both formats
+              this.issueCache[key] = { id: numericId, summary: summary || key, cached: new Date() };
+              this.issueCache[`ISSUE-${numericId}`] = { id: numericId, summary: summary || key, cached: new Date() };
+              console.error(`✅ Resolved issue ID ${numericId} → ${key}`);
+            } else {
+              console.error(`⚠️ Could not resolve issue ID: ${result.reason}`);
+            }
+          }
         }
       }
 
